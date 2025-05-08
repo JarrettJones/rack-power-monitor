@@ -19,29 +19,29 @@
     },
     "rscm_list": [
         {
-            "name": "G24",
+            "name": "HI02 - G24",
             "address": "10.57.189.43"
         },
         {
-            "name": "H24",
+            "name": "HI02 - H24",
             "address": "10.57.191.37"
         },
         {
-            "name": "H29",
+            "name": "HI02 - H29",
             "address": "10.57.191.13"
         }
     ],
     "rscms": [
         {
-            "name": "G24",
+            "name": "HI02 - G24",
             "address": "10.57.189.43"
         },
         {
-            "name": "H24",
+            "name": "HI02 - H24",
             "address": "10.57.191.37"
         },
         {
-            "name": "H29",
+            "name": "HI02 - H29",
             "address": "10.57.191.13"
         }
     ]

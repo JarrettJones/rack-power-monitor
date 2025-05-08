@@ -31,11 +31,9 @@ runtime_hook.py
 # Environment
 venv/
 env/
-ENV/
 
-# IDE
-.vscode/
-.idea/
+# Data files
+power_data/
 
 # OS specific
 .DS_Store
