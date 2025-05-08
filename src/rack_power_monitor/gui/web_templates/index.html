@@ -14,10 +14,42 @@
         <h2>Monitored Racks</h2>
         <div class="rack-grid">
             {% for rack in racks %}
-            <div class="rack-card">
+            <div class="rack-card" data-rack-name="{{ rack.name }}" data-rack-address="{{ rack.address }}">
                 <h3>{{ rack.name }}</h3>
                 <p>Address: {{ rack.address }}</p>
-                <p>Status: <span class="status-badge {{ rack.status.lower() }}">{{ rack.status }}</span></p>
+                <p>Status: <span class="status-badge {{ rack.status.lower() }}" data-status-field>{{ rack.status }}</span></p>
+                
+                <!-- Show current reading prominently if monitoring -->
+                <div class="current-reading" 
+                     {% if rack.status.lower() != 'monitoring' or not rack.stats or not rack.stats.current %}
+                     style="display: none;"
+                     {% endif %}>
+                    <span class="reading-value" data-current-power>{{ rack.stats.current if rack.stats and rack.stats.current else '0.00 W' }}</span>
+                    <span class="reading-label">Current Power</span>
+                </div>
+                
+                <!-- Additional statistics -->
+                <div class="rack-stats" 
+                     {% if not rack.stats %}
+                     style="display: none;"
+                     {% endif %}>
+                    <p class="current-stat" 
+                       {% if rack.status.lower() == 'monitoring' %}
+                       style="display: none;"
+                       {% endif %}>
+                        Current: <strong data-current-stat>{{ rack.stats.current if rack.stats and rack.stats.current else '0.00 W' }}</strong>
+                    </p>
+                    <p class="count-stat">
+                        Readings: <strong data-readings-count>{{ rack.stats.count if rack.stats and rack.stats.count else '0' }}</strong>
+                    </p>
+                    <p class="mode-stat" 
+                       {% if not rack.stats or not rack.stats.mode %}
+                       style="display: none;"
+                       {% endif %}>
+                        Mode: <strong data-mode>{{ rack.stats.mode if rack.stats and rack.stats.mode else 'N/A' }}</strong>
+                    </p>
+                </div>
+                
                 <a href="/rack/{{ rack.name }}" class="view-button">View Details</a>
             </div>
             {% else %}
@@ -28,5 +60,120 @@
     <footer>
         <p>&copy; Microsoft 2025</p>
     </footer>
+    
+    <script>
+        // Wait for the DOM to be loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            // Start auto-refresh
+            startAutoRefresh();
+            
+            // Optional: Add visual indicator that auto-refresh is active
+            const header = document.querySelector('header');
+            const refreshIndicator = document.createElement('div');
+            refreshIndicator.className = 'refresh-indicator';
+            refreshIndicator.innerHTML = 'Auto-refreshing <span class="dots">...</span>';
+            header.appendChild(refreshIndicator);
+            
+            // Animate the dots
+            let dotsState = 0;
+            setInterval(() => {
+                const dots = document.querySelector('.refresh-indicator .dots');
+                dotsState = (dotsState + 1) % 4;
+                dots.textContent = '.'.repeat(dotsState);
+            }, 500);
+        });
+        
+        // Function to start auto-refresh
+        function startAutoRefresh() {
+            // Refresh every 5 seconds
+            setInterval(updateAllRackData, 5000);
+        }
+        
+        // Function to update all racks on the page
+        function updateAllRackData() {
+            // Get all rack cards
+            const rackCards = document.querySelectorAll('.rack-card');
+            
+            // Update each rack
+            rackCards.forEach(card => {
+                const rackName = card.dataset.rackName;
+                const rackAddress = card.dataset.rackAddress;
+                
+                updateRackData(card, rackName, rackAddress);
+            });
+        }
+        
+        // Function to update a specific rack's data
+        function updateRackData(cardElement, rackName, rackAddress) {
+            // Create the API URL
+            const apiUrl = `/api/rack/${rackName}/status`;
+            
+            // Fetch updated data
+            fetch(apiUrl)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Update status
+                    const statusElement = cardElement.querySelector('[data-status-field]');
+                    if (statusElement) {
+                        statusElement.textContent = data.status;
+                        statusElement.className = 'status-badge ' + data.status.toLowerCase();
+                    }
+                    
+                    // Update current power display
+                    const currentPowerElement = cardElement.querySelector('[data-current-power]');
+                    const currentStatElement = cardElement.querySelector('[data-current-stat]');
+                    if (data.stats && data.stats.current) {
+                        if (currentPowerElement) currentPowerElement.textContent = data.stats.current;
+                        if (currentStatElement) currentStatElement.textContent = data.stats.current;
+                    }
+                    
+                    // Show/hide current-reading based on monitoring status
+                    const currentReadingDiv = cardElement.querySelector('.current-reading');
+                    if (currentReadingDiv) {
+                        if (data.status.toLowerCase() === 'monitoring' && data.stats && data.stats.current) {
+                            currentReadingDiv.style.display = 'block';
+                        } else {
+                            currentReadingDiv.style.display = 'none';
+                        }
+                    }
+                    
+                    // Show/hide current stat based on monitoring status
+                    const currentStatP = cardElement.querySelector('.current-stat');
+                    if (currentStatP) {
+                        if (data.status.toLowerCase() !== 'monitoring') {
+                            currentStatP.style.display = 'block';
+                        } else {
+                            currentStatP.style.display = 'none';
+                        }
+                    }
+                    
+                    // Update readings count
+                    const readingsCountElement = cardElement.querySelector('[data-readings-count]');
+                    if (readingsCountElement && data.stats && data.stats.count) {
+                        readingsCountElement.textContent = data.stats.count;
+                    }
+                    
+                    // Update mode
+                    const modeElement = cardElement.querySelector('[data-mode]');
+                    const modeStatP = cardElement.querySelector('.mode-stat');
+                    if (modeElement && modeStatP && data.stats) {
+                        if (data.stats.mode) {
+                            modeElement.textContent = data.stats.mode;
+                            modeStatP.style.display = 'block';
+                        } else {
+                            modeStatP.style.display = 'none';
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error updating rack data:', error);
+                });
+        }
+    </script>
 </body>
 </html>

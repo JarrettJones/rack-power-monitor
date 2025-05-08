@@ -16,6 +16,10 @@
         <h2>{{ rack_name }} Power Monitoring</h2>
         
         <div class="stats-panel">
+            <div class="stat-box current">
+                <span class="stat-label">Current Power</span>
+                <span class="stat-value" id="current-power">-</span>
+            </div>
             <div class="stat-box">
                 <span class="stat-label">Min Power</span>
                 <span class="stat-value" id="min-power">-</span>
@@ -27,6 +31,14 @@
             <div class="stat-box">
                 <span class="stat-label">Average Power</span>
                 <span class="stat-value" id="avg-power">-</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label">Mode Power</span>
+                <span class="stat-value" id="mode-power">-</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label">Readings</span>
+                <span class="stat-value" id="reading-count">-</span>
             </div>
         </div>
         
@@ -107,9 +119,28 @@
                 }
                 
                 // Update statistics
+                if (data.power && data.power.length > 0) {
+                    // Current power is the latest value
+                    document.getElementById('current-power').textContent = data.power[data.power.length-1].toFixed(2) + ' W';
+                }
                 document.getElementById('min-power').textContent = data.min.toFixed(2) + ' W';
                 document.getElementById('max-power').textContent = data.max.toFixed(2) + ' W';
                 document.getElementById('avg-power').textContent = data.avg.toFixed(2) + ' W';
+                
+                // Update new statistics
+                if (data.mode !== undefined && data.mode_count !== undefined) {
+                    if (data.mode_count > 1) {
+                        document.getElementById('mode-power').textContent = 
+                            `${data.mode.toFixed(2)} W (${data.mode_count} times)`;
+                    } else {
+                        document.getElementById('mode-power').textContent = 'No mode (all values unique)';
+                    }
+                } else {
+                    document.getElementById('mode-power').textContent = 'N/A';
+                }
+                
+                // Update reading count
+                document.getElementById('reading-count').textContent = data.power.length;
                 
             } catch (error) {
                 console.error("Error loading data:", error);

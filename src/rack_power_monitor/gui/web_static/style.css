@@ -1,4 +1,8 @@
 /* Basic styling */
+html {
+    height: 100%;
+}
+
 body {
     font-family: Arial, sans-serif;
     line-height: 1.6;
@@ -6,6 +10,9 @@ body {
     margin: 0;
     padding: 0;
     background-color: #f5f5f5;
+    min-height: 100vh; /* Full viewport height */
+    display: flex;
+    flex-direction: column;
 }
 
 header {
@@ -23,6 +30,7 @@ main {
     max-width: 1200px;
     margin: 0 auto;
     padding: 2rem;
+    flex: 1; /* This makes main expand to push footer down */
 }
 
 footer {
@@ -30,26 +38,36 @@ footer {
     color: white;
     text-align: center;
     padding: 1rem;
-    margin-top: 2rem;
+    /* Remove margin-top to avoid extra space */
+    margin-top: 0;
 }
 
 /* Rack grid */
 .rack-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center; /* Center cards horizontally */
+    gap: 20px; /* Space between cards */
+    margin: 0 auto; /* Center the entire grid */
 }
 
 .rack-card {
-    background-color: white;
+    background-color: #ffffff;
     border-radius: 5px;
     padding: 1.5rem;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    transition: transform 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
+    width: 320px; /* Fixed width for each card */
+    flex-grow: 0; /* Don't allow cards to grow */
+    flex-shrink: 0; /* Don't allow cards to shrink */
 }
 
-.rack-card:hover {
-    transform: translateY(-5px);
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .rack-card {
+        width: 100%; /* Full width on small screens */
+    }
 }
 
 .status-badge {
@@ -110,32 +128,84 @@ footer {
     align-items: center;
 }
 
+/* Enhanced stats panel styling */
 .stats-panel {
     display: flex;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin-bottom: 20px;
 }
 
 .stat-box {
-    background-color: white;
+    background-color: #f5f5f5;
     border-radius: 5px;
-    padding: 1rem;
-    flex: 1;
+    padding: 10px;
+    min-width: 150px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    flex-grow: 1;
     text-align: center;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 }
 
 .stat-label {
     display: block;
     font-size: 0.9rem;
-    color: #666;
-    margin-bottom: 0.5rem;
+    color: #555;
+    margin-bottom: 5px;
 }
 
 .stat-value {
-    font-size: 1.5rem;
+    display: block;
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: #333;
+}
+
+/* Current power box styling */
+.stat-box.current {
+    background-color: #e3f2fd; /* Light blue background */
+    border-left: 4px solid #0078d7; /* Left border accent */
+}
+
+.stat-box.current .stat-value {
+    color: #0078d7; /* Blue text for the value */
+    font-size: 1.4rem; /* Slightly larger font */
+}
+
+/* Rack card statistics styling */
+.rack-stats {
+    background-color: #f9f9f9;
+    border-radius: 5px;
+    padding: 10px;
+    margin: 10px 0;
+}
+
+.rack-stats p {
+    margin: 5px 0;
+    font-size: 0.9rem;
+}
+
+/* Current reading display on rack cards */
+.current-reading {
+    background-color: #e3f2fd;
+    border-left: 4px solid #0078d7;
+    padding: 12px;
+    margin: 15px 0;
+    text-align: center;
+    border-radius: 5px;
+}
+
+.reading-value {
+    display: block;
+    font-size: 1.8rem;
     font-weight: bold;
     color: #0078d7;
+}
+
+.reading-label {
+    display: block;
+    font-size: 0.9rem;
+    color: #555;
+    margin-top: 5px;
 }
 
 button, select {
@@ -148,4 +218,16 @@ button, select {
 
 button:hover {
     background-color: #f0f0f0;
+}
+
+/* Auto-refresh indicator */
+.refresh-indicator {
+    position: absolute;
+    right: 20px;
+    top: 20px;
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.8);
+    background-color: rgba(0,0,0,0.2);
+    padding: 4px 8px;
+    border-radius: 4px;
 }

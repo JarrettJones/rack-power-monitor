@@ -988,18 +988,24 @@ class MonitorTab(ttk.Frame):
         stats_frame.rowconfigure(1, weight=1)
         stats_frame.rowconfigure(2, weight=1)
         stats_frame.rowconfigure(3, weight=1)
+        stats_frame.rowconfigure(4, weight=1)  # Added for mode
+        stats_frame.rowconfigure(5, weight=1)  # Added for reading count
         
         # Add statistics
         ttk.Label(stats_frame, text="Current:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
         ttk.Label(stats_frame, text="Minimum:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
         ttk.Label(stats_frame, text="Maximum:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
         ttk.Label(stats_frame, text="Average:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Label(stats_frame, text="Mode:").grid(row=4, column=0, sticky=tk.W, padx=5, pady=2)  # Added for mode
+        ttk.Label(stats_frame, text="Readings:").grid(row=5, column=0, sticky=tk.W, padx=5, pady=2)  # Added for count
         
         # Create StringVars for statistics
         current_var = tk.StringVar(value="0 W")
         min_var = tk.StringVar(value="0 W")
         max_var = tk.StringVar(value="0 W")
         avg_var = tk.StringVar(value="0 W")
+        mode_var = tk.StringVar(value="0 W")  # Added for mode
+        count_var = tk.StringVar(value="0")  # Added for reading count
         
         # Add value labels
         current_label = ttk.Label(stats_frame, textvariable=current_var, font=("Arial", 10, "bold"))
@@ -1010,6 +1016,10 @@ class MonitorTab(ttk.Frame):
         max_label.grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
         avg_label = ttk.Label(stats_frame, textvariable=avg_var)
         avg_label.grid(row=3, column=1, sticky=tk.W, padx=5, pady=2)
+        mode_label = ttk.Label(stats_frame, textvariable=mode_var)  # Added for mode
+        mode_label.grid(row=4, column=1, sticky=tk.W, padx=5, pady=2)
+        count_label = ttk.Label(stats_frame, textvariable=count_var)  # Added for count
+        count_label.grid(row=5, column=1, sticky=tk.W, padx=5, pady=2)
         
         # Create a control button frame
         control_frame = ttk.Frame(info_frame)
@@ -1042,7 +1052,9 @@ class MonitorTab(ttk.Frame):
                 'current': current_var,
                 'min': min_var,
                 'max': max_var,
-                'avg': avg_var
+                'avg': avg_var,
+                'mode': mode_var,  # Added for mode
+                'count': count_var  # Added for count
             },
             'controls': {
                 'pause_var': pause_var,
@@ -1487,11 +1499,38 @@ class MonitorTab(ttk.Frame):
         max_power = max(power_values)
         avg_power = sum(power_values) / len(power_values)
         
+        # Calculate mode (most frequent value)
+        # Round to 2 decimal places to handle floating point values
+        rounded_values = [round(x, 2) for x in power_values]
+        
+        # Count occurrences of each value
+        from collections import Counter
+        value_counts = Counter(rounded_values)
+        
+        # Find the most common value(s)
+        most_common = value_counts.most_common(1)
+        
+        # Check if we have a mode
+        if most_common:
+            mode_power, mode_count = most_common[0]
+            # Only show mode if it appears more than once
+            if mode_count > 1:
+                mode_text = f"{mode_power:.2f} W ({mode_count} times)"
+            else:
+                mode_text = "No mode (all values unique)"
+        else:
+            mode_text = "N/A"
+        
+        # Get reading count
+        reading_count = len(power_values)
+        
         # Update statistics variables
         tab_data['stats']['current'].set(f"{current_power:.2f} W")
         tab_data['stats']['min'].set(f"{min_power:.2f} W")
         tab_data['stats']['max'].set(f"{max_power:.2f} W")
         tab_data['stats']['avg'].set(f"{avg_power:.2f} W")
+        tab_data['stats']['mode'].set(mode_text)
+        tab_data['stats']['count'].set(f"{reading_count}")
 
     def _save_rscm_list(self):
         """Save the list of RSCMs to the configuration."""
