@@ -1,0 +1,89 @@
+/* Dark theme stylesheet for the Rack Power Monitor application */
+
+/* This is actually a ttk theme configuration file with CSS-like syntax */
+/* It's not standard CSS, but specific to tkinter theming */
+
+/* These are custom theme properties for our application */
+@define-color bg_color #1e1e1e;
+@define-color fg_color #d4d4d4;
+@define-color accent_color #007acc;
+@define-color selected_bg #264f78;
+@define-color selected_fg #ffffff;
+@define-color button_bg #3c3c3c;
+@define-color button_fg #d4d4d4;
+@define-color entry_bg #2d2d2d;
+@define-color border_color #555555;
+
+/* Main application colors */
+.root {
+    background-color: @bg_color;
+    color: @fg_color;
+}
+
+/* Widget styling */
+.button {
+    background-color: @button_bg;
+    color: @button_fg;
+    border-color: @border_color;
+}
+
+.button:hover {
+    background-color: #505050;
+}
+
+.button:active {
+    background-color: #0e639c;
+}
+
+/* Entry fields */
+.entry {
+    background-color: @entry_bg;
+    color: @fg_color;
+    border-color: #3c3c3c;
+}
+
+/* Tabs */
+.notebook.tab {
+    background-color: #252526;
+    color: @fg_color;
+}
+
+.notebook.tab:selected {
+    background-color: @bg_color;
+    border-color: @accent_color;
+}
+
+/* Tree views */
+.treeview {
+    background-color: @entry_bg;
+    color: @fg_color;
+}
+
+.treeview:selected {
+    background-color: #094771;
+}
+
+/* Graph elements */
+.graph.background {
+    background-color: @bg_color;
+}
+
+.graph.axis {
+    color: @fg_color;
+}
+
+.graph.grid {
+    color: #3c3c3c;
+}
+
+.graph.series1 {
+    color: #4ec9b0;
+}
+
+.graph.series2 {
+    color: #ce9178;
+}
+
+.graph.series3 {
+    color: #b5cea8;
+}

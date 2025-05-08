@@ -1,0 +1,48 @@
+{
+    "data_dir": "power_data",
+    "enable_logging": true,
+    "chart_theme": "dark_background",
+    "refresh_interval": 0.1,
+    "enable_alerts": false,
+    "alert_threshold": 1000,
+    "azure": {
+        "key_vault_url": "https://wus3-dev-rm-kv-001.vault.azure.net/",
+        "default_secret": "SCHIE-Lab-Rack-Manager",
+        "default_username": "root",
+        "auth_method": "Default"
+    },
+    "ui_theme": "Dark",
+    "font_size": 10,
+    "credentials": {
+        "default_username": "root",
+        "default_password": "Z0FBQUFBQm9HLU9xWG5KS1RpVGxUWlpDVjQ4TzRxaFZ5T3MxemtqLTlGLTVNVGhURnhPZ1lNR0xWWWZCQndlWmVQaEVaUlBYNEprbDhPUGZraUpPZ21jdWNnWHY2MHBUcE5nRU0zX19Gd21MVjdXT2RSb1VDOWc9"
+    },
+    "rscm_list": [
+        {
+            "name": "G24",
+            "address": "10.57.189.43"
+        },
+        {
+            "name": "H24",
+            "address": "10.57.191.37"
+        },
+        {
+            "name": "H29",
+            "address": "10.57.191.13"
+        }
+    ],
+    "rscms": [
+        {
+            "name": "G24",
+            "address": "10.57.189.43"
+        },
+        {
+            "name": "H24",
+            "address": "10.57.191.37"
+        },
+        {
+            "name": "H29",
+            "address": "10.57.191.13"
+        }
+    ]
+}

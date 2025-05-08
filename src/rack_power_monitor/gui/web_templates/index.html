@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rack Power Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>Rack Power Monitor</h1>
+    </header>
+    <main>
+        <h2>Monitored Racks</h2>
+        <div class="rack-grid">
+            {% for rack in racks %}
+            <div class="rack-card">
+                <h3>{{ rack.name }}</h3>
+                <p>Address: {{ rack.address }}</p>
+                <p>Status: <span class="status-badge {{ rack.status.lower() }}">{{ rack.status }}</span></p>
+                <a href="/rack/{{ rack.name }}" class="view-button">View Details</a>
+            </div>
+            {% else %}
+            <p>No racks are currently being monitored.</p>
+            {% endfor %}
+        </div>
+    </main>
+    <footer>
+        <p>&copy; Microsoft 2025</p>
+    </footer>
+</body>
+</html>

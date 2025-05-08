@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ rack_name }} - Rack Power Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Rack Power Monitor</h1>
+        <a href="/" class="back-link">&larr; Back to Rack List</a>
+    </header>
+    <main>
+        <h2>{{ rack_name }} Power Monitoring</h2>
+        
+        <div class="stats-panel">
+            <div class="stat-box">
+                <span class="stat-label">Min Power</span>
+                <span class="stat-value" id="min-power">-</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label">Max Power</span>
+                <span class="stat-value" id="max-power">-</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label">Average Power</span>
+                <span class="stat-value" id="avg-power">-</span>
+            </div>
+        </div>
+        
+        <div class="chart-container">
+            <canvas id="powerChart"></canvas>
+        </div>
+        
+        <div class="controls">
+            <button id="refreshBtn">Refresh Data</button>
+            <label>
+                Auto-refresh:
+                <select id="refreshInterval">
+                    <option value="0">Off</option>
+                    <option value="5000">5 seconds</option>
+                    <option value="10000">10 seconds</option>
+                    <option value="30000">30 seconds</option>
+                    <option value="60000">1 minute</option>
+                </select>
+            </label>
+        </div>
+    </main>
+    
+    <script>
+        const rackName = "{{ rack_name }}";
+        let chart;
+        let refreshTimer;
+        
+        // Initialize the chart
+        function initChart() {
+            const ctx = document.getElementById('powerChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Power (W)',
+                        data: [],
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1,
+                        fill: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Power (W)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Load data from API
+        async function loadData() {
+            try {
+                const response = await fetch(`/api/rack/${rackName}/data`);
+                const data = await response.json();
+                
+                // Update chart
+                if (chart) {
+                    chart.data.labels = data.timestamps.map(ts => {
+                        const date = new Date(ts);
+                        return date.toLocaleTimeString();
+                    });
+                    chart.data.datasets[0].data = data.power;
+                    chart.update();
+                }
+                
+                // Update statistics
+                document.getElementById('min-power').textContent = data.min.toFixed(2) + ' W';
+                document.getElementById('max-power').textContent = data.max.toFixed(2) + ' W';
+                document.getElementById('avg-power').textContent = data.avg.toFixed(2) + ' W';
+                
+            } catch (error) {
+                console.error("Error loading data:", error);
+            }
+        }
+        
+        // Set up auto-refresh
+        function setupAutoRefresh() {
+            const select = document.getElementById('refreshInterval');
+            select.addEventListener('change', function() {
+                if (refreshTimer) {
+                    clearInterval(refreshTimer);
+                }
+                
+                const interval = parseInt(this.value);
+                if (interval > 0) {
+                    refreshTimer = setInterval(loadData, interval);
+                }
+            });
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            initChart();
+            loadData();
+            
+            // Set up refresh button
+            document.getElementById('refreshBtn').addEventListener('click', loadData);
+            
+            // Set up auto-refresh
+            setupAutoRefresh();
+        });
+    </script>
+</body>
+</html>

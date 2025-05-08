@@ -1,0 +1,32 @@
+{
+  "data_dir": "power_data",
+  "enable_logging": true,
+  "chart_theme": "default",
+  "refresh_interval": 1.0,
+  "enable_alerts": false,
+  "alert_threshold": 1000,
+  "ui_theme": "Default",
+  "font_size": 10,
+  "credentials": {
+    "default_username": "root",
+    "default_password": ""
+  },
+  "monitoring": {
+    "default_interval_minutes": 1.0,
+    "default_duration_hours": 1.0,
+    "auto_save_data": true,
+    "auto_generate_report": true
+  },
+  "analysis": {
+    "default_chart_type": "line",
+    "show_statistics": true,
+    "auto_detect_anomalies": false,
+    "default_time_range": "all"
+  },
+  "api": {
+    "timeout_seconds": 10,
+    "retry_attempts": 3,
+    "retry_delay_seconds": 1
+  },
+  "rscm_list": []
+}
