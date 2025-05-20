@@ -2,15 +2,27 @@ from flask import Flask, render_template, jsonify
 import threading
 import webbrowser
 import os
+import logging
+import traceback
+import datetime
+from collections import Counter
 
 class WebMonitorServer:
     def __init__(self, app_instance, port=5000):
         """Initialize the web monitor server."""
         self.app = app_instance  # Main application instance
         self.port = port
+        
+        # Correct static folder path
+        static_folder = os.path.join(os.path.dirname(__file__), 'web_static')
+        template_folder = os.path.join(os.path.dirname(__file__), 'web_templates')
+        
+        # Ensure Flask knows where to find the static files
         self.flask_app = Flask(__name__,
-                              template_folder=os.path.join(os.path.dirname(__file__), 'web_templates'),
-                              static_folder=os.path.join(os.path.dirname(__file__), 'web_static'))
+                          template_folder=template_folder,
+                          static_folder=static_folder,
+                          static_url_path='/static')
+    
         self.setup_routes()
         self.server_thread = None
         self.is_running = False
@@ -20,139 +32,135 @@ class WebMonitorServer:
         
         @self.flask_app.route('/')
         def index():
-            # Example of properly formatting rack data
-            racks = []
+            # Set up empty rack lists
+            active_racks = []
+            standby_racks = []
             
-            # Check if monitoring_data attribute exists before trying to access it
-            if not hasattr(self.app, 'monitoring_data'):
-                self.app.monitoring_data = {}
-            
-            # Also ensure monitoring_tasks exists
-            if not hasattr(self.app, 'monitoring_tasks'):
-                self.app.monitoring_tasks = {}
-            
-            # Get rack data from either monitoring_data or rack_tabs
+            # Get data sources 
             data_source = {}
             if hasattr(self.app, 'monitor_tab') and hasattr(self.app.monitor_tab, 'rack_tabs'):
                 data_source = self.app.monitor_tab.rack_tabs
             elif hasattr(self.app, 'monitoring_data') and self.app.monitoring_data:
                 data_source = self.app.monitoring_data
             
-            # Debug logging to see what's happening
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"Found {len(data_source)} racks in data source")
-            
+            # Process each rack
             for rack_key, rack_data in data_source.items():
-                try:
-                    # Parse rack key (format typically: "name_address")
-                    if '_' in rack_key:
-                        name, address = rack_key.split('_', 1)
-                    else:
-                        name = rack_key
-                        address = "Unknown"
+                # Parse rack name
+                if '_' in rack_key:
+                    name, address = rack_key.split('_', 1)
+                else:
+                    name = rack_key
+                    address = "Unknown"
+                
+                # Multiple signals that a rack might be monitored
+                signals = {
+                    "has_monitor_task": False,
+                    "has_monitor_object": False,
+                    "has_data": False,
+                    "in_notebook": False,
+                    "recent_data": False
+                }
+                
+                # Check for monitoring task
+                if hasattr(self.app, 'monitoring_tasks') and rack_key in self.app.monitoring_tasks:
+                    signals["has_monitor_task"] = True
+                    if 'monitor' in self.app.monitoring_tasks[rack_key]:
+                        signals["has_monitor_object"] = True
+                
+                # Check for data
+                if 'data' in rack_data and rack_data['data']:
+                    signals["has_data"] = True
                     
-                    # Multiple signals that a rack might be monitored
-                    signals = {
-                        "has_monitor_task": False,
-                        "has_monitor_object": False,
-                        "has_data": False,
-                        "in_notebook": False,
-                        "recent_data": False
-                    }
+                    # Check if data is recent (last 5 minutes)
+                    if len(rack_data['data']) > 0:
+                        last_timestamp = rack_data['data'][-1][0]
+                        if isinstance(last_timestamp, datetime.datetime):
+                            time_diff = datetime.datetime.now() - last_timestamp
+                            if time_diff.total_seconds() < 300:  # 5 minutes
+                                signals["recent_data"] = True
+                
+                # Check if in notebook
+                if 'added_to_notebook' in rack_data:
+                    signals["in_notebook"] = rack_data['added_to_notebook']
+                
+                # Determine status based on signals
+                status = "Not Monitoring"
+                is_monitoring = (
+                    (signals["has_monitor_task"] and signals["has_monitor_object"]) or
+                    (signals["has_data"] and signals["in_notebook"]) or
+                    signals["recent_data"] or
+                    (signals["has_data"] and name == "G24")  # Special case for G24
+                )
+                
+                if is_monitoring:
+                    # Check if paused
+                    is_paused = False
                     
-                    # Check for monitoring task
-                    if hasattr(self.app, 'monitoring_tasks') and rack_key in self.app.monitoring_tasks:
-                        signals["has_monitor_task"] = True
-                        if 'monitor' in self.app.monitoring_tasks[rack_key]:
-                            signals["has_monitor_object"] = True
+                    # Check rack_data directly
+                    if 'paused' in rack_data:
+                        is_paused = rack_data['paused']
                     
-                    # Check for data
+                    # Check pause button state
+                    elif 'controls' in rack_data and 'pause_var' in rack_data['controls']:
+                        pause_text = rack_data['controls']['pause_var'].get()
+                        is_paused = (pause_text == "Resume")
+                    
+                    # Also check monitoring_tasks
+                    if not is_paused and hasattr(self.app, 'monitoring_tasks') and rack_key in self.app.monitoring_tasks:
+                        if 'paused' in self.app.monitoring_tasks[rack_key]:
+                            is_paused = self.app.monitoring_tasks[rack_key]['paused']
+                    
+                    status = "Paused" if is_paused else "Monitoring"
+        
+                # For active racks, calculate additional statistics
+                if status == "Monitoring":
+                    # Get power values from data
+                    power_values = []
                     if 'data' in rack_data and rack_data['data']:
-                        signals["has_data"] = True
-                        
-                        # Check if data is recent (last 5 minutes)
-                        if len(rack_data['data']) > 0:
-                            import datetime
-                            last_timestamp = rack_data['data'][-1][0]
-                            if isinstance(last_timestamp, datetime.datetime):
-                                time_diff = datetime.datetime.now() - last_timestamp
-                                if time_diff.total_seconds() < 300:  # 5 minutes
-                                    signals["recent_data"] = True
+                        power_values = [entry[1] for entry in rack_data['data'] if isinstance(entry, (list, tuple)) and len(entry) > 1]
                     
-                    # Check if in notebook
-                    if 'added_to_notebook' in rack_data:
-                        signals["in_notebook"] = rack_data['added_to_notebook']
+                    # Calculate statistics
+                    current_power = None
+                    avg_power = None
+                    count = len(power_values)
                     
-                    # Determine status based on signals
-                    status = "Not Monitoring"
-                    is_monitoring = (
-                        (signals["has_monitor_task"] and signals["has_monitor_object"]) or
-                        (signals["has_data"] and signals["in_notebook"]) or
-                        signals["recent_data"] or
-                        (signals["has_data"] and name == "G24")  # Special case for G24
-                    )
+                    if power_values:
+                        current_power = f"{power_values[-1]:.2f} W"
+                        avg_power = f"{sum(power_values) / count:.2f} W"
                     
-                    if is_monitoring:
-                        # Check if paused
-                        is_paused = False
-                        
-                        # Check rack_data directly
-                        if 'paused' in rack_data:
-                            is_paused = rack_data['paused']
-                        
-                        # Check pause button state
-                        elif 'controls' in rack_data and 'pause_var' in rack_data['controls']:
-                            pause_text = rack_data['controls']['pause_var'].get()
-                            is_paused = (pause_text == "Resume")
-                        
-                        # Also check monitoring_tasks
-                        if not is_paused and hasattr(self.app, 'monitoring_tasks') and rack_key in self.app.monitoring_tasks:
-                            if 'paused' in self.app.monitoring_tasks[rack_key]:
-                                is_paused = self.app.monitoring_tasks[rack_key]['paused']
-                        
-                        status = "Paused" if is_paused else "Monitoring"
-                    
-                    logger.info(f"Rack {name}: signals={signals}, status={status}")
-                    
-                    # Get statistics if available
-                    stats = None
-                    if 'data' in rack_data and rack_data['data']:
-                        power_values = [entry[1] for entry in rack_data['data']]
-                        if power_values:
-                            current = power_values[-1]
-                            
-                            # Format mode if we have enough data
-                            mode_text = None
-                            if len(power_values) > 1:
-                                from collections import Counter
-                                rounded_values = [round(x, 2) for x in power_values]
-                                value_counts = Counter(rounded_values)
-                                most_common = value_counts.most_common(1)
-                                if most_common and most_common[0][1] > 1:  # If count > 1
-                                    mode_power, mode_count = most_common[0]
-                                    mode_text = f"{mode_power:.2f} W ({mode_count} times)"
-                            
-                            stats = {
-                                'current': f"{current:.2f} W",  # Format with units
-                                'count': str(len(power_values)),
-                                'mode': mode_text
-                            }
-                    
-                    racks.append({
+                    # Add to active racks with stats
+                    active_racks.append({
                         'name': name,
                         'address': address,
                         'status': status,
-                        'stats': stats
+                        'stats': {
+                            'current': current_power,
+                            'avg': avg_power,
+                            'count': count
+                        }
                     })
-                except Exception as e:
-                    # Log the error but continue processing other racks
-                    import logging
-                    logging.error(f"Error processing rack {rack_key}: {e}")
-                    import traceback
-                    logging.error(traceback.format_exc())
+                else:
+                    # Add to the standby racks
+                    standby_racks.append({
+                        'name': name,
+                        'address': address,
+                        'status': status
+                    })
+        
+            # Sort racks by name for consistent display
+            active_racks.sort(key=lambda x: x['name'])
+            standby_racks.sort(key=lambda x: x['name'])
             
-            return render_template('index.html', racks=racks)
+            # Get counts for the tab headers
+            active_count = len(active_racks)
+            standby_count = len(standby_racks)
+            
+            # Return the template with all data
+            return render_template('index.html', 
+                                  active_racks=active_racks,
+                                  standby_racks=standby_racks,
+                                  active_count=active_count,
+                                  standby_count=standby_count)
             
         @self.flask_app.route('/rack/<rack_name>')
         def rack_detail(rack_name):
@@ -176,67 +184,59 @@ class WebMonitorServer:
         @self.flask_app.route('/api/rack/<rack_name>/data')
         def api_rack_data(rack_name):
             """API endpoint to get power data for a specific rack."""
-            data = []
-            if hasattr(self.app, 'monitor_tab'):
-                for rack_key, rack_data in self.app.monitor_tab.rack_tabs.items():
-                    if rack_key.startswith(f"{rack_name}_"):
-                        # Process the data to a format suitable for web display
-                        timestamps = []
-                        power_values = []
-                        for point in rack_data.get('data', []):
-                            timestamps.append(point[0].isoformat())
-                            power_values.append(point[1])
-                        data = {
-                            'timestamps': timestamps,
-                            'power': power_values,
-                            'name': rack_name,
-                            'min': min(power_values) if power_values else 0,
-                            'max': max(power_values) if power_values else 0,
-                            'avg': sum(power_values)/len(power_values) if power_values else 0
-                        }
-                        break
-            return jsonify(data)
-        
-        @self.flask_app.route('/api/rack/<rack_name>/data')
-        def rack_data(rack_name):
-            # Find the rack in the app's data
+            # Initialize response data
+            timestamps = []
+            power_values = []
             rack_data = None
-            for rack_key, data in self.app.monitoring_data.items():
-                if rack_name in rack_key:
-                    rack_data = data
-                    break
             
-            if not rack_data:
-                return jsonify({"error": "Rack not found"}), 404
+            # First try monitor_tab.rack_tabs
+            if hasattr(self.app, 'monitor_tab') and hasattr(self.app.monitor_tab, 'rack_tabs'):
+                for rack_key, data in self.app.monitor_tab.rack_tabs.items():
+                    if rack_name in rack_key and 'data' in data and data['data']:
+                        rack_data = data
+                        timestamps = [point[0].isoformat() if hasattr(point[0], 'isoformat') else str(point[0]) for point in data['data']]
+                        power_values = [point[1] for point in data['data']]
+                        break
             
-            # Extract timestamps and power values
-            timestamps = [entry[0] for entry in rack_data['data']]
-            power = [entry[1] for entry in rack_data['data']]
+            # If not found, then try monitoring_data
+            if not power_values and hasattr(self.app, 'monitoring_data'):
+                for rack_key, data in self.app.monitoring_data.items():
+                    if rack_name in rack_key and 'data' in data and data['data']:
+                        rack_data = data
+                        timestamps = [point[0].isoformat() if hasattr(point[0], 'isoformat') else str(point[0]) for point in data['data']]
+                        power_values = [point[1] for point in data['data']]
+                        break
+            
+            # If still no data found, return an error
+            if not power_values:
+                return jsonify({"error": "No data available for rack"}), 404
             
             # Calculate statistics
-            min_power = min(power) if power else 0
-            max_power = max(power) if power else 0
-            avg_power = sum(power) / len(power) if power else 0
+            min_power = min(power_values) if power_values else 0
+            max_power = max(power_values) if power_values else 0
+            avg_power = sum(power_values) / len(power_values) if power_values else 0
             
             # Calculate mode (most frequent value)
             mode_power = None
             mode_count = 0
             
-            if power:
-                from collections import Counter
+            try:
                 # Round to 2 decimal places to handle floating point values
-                rounded_values = [round(x, 2) for x in power]
+                rounded_values = [round(x, 2) for x in power_values]
                 value_counts = Counter(rounded_values)
                 
                 # Get the most common value
                 most_common = value_counts.most_common(1)
                 if most_common:
                     mode_power, mode_count = most_common[0]
+            except Exception as e:
+                logging.warning(f"Failed to calculate mode: {str(e)}")
             
             # Return data as JSON
             return jsonify({
                 "timestamps": timestamps,
-                "power": power,
+                "power": power_values,
+                "name": rack_name,
                 "min": min_power,
                 "max": max_power,
                 "avg": avg_power,
@@ -248,7 +248,6 @@ class WebMonitorServer:
         def get_rack_status(rack_name):
             """API endpoint to get current status and stats for a specific rack"""
             try:
-                import logging
                 logger = logging.getLogger(__name__)
                 
                 # Initialize response
@@ -327,7 +326,6 @@ class WebMonitorServer:
                             
                             # Check if data is recent (last 5 minutes)
                             if len(tab_data['data']) > 0:
-                                import datetime
                                 last_timestamp = tab_data['data'][-1][0]
                                 if isinstance(last_timestamp, datetime.datetime):
                                     time_diff = datetime.datetime.now() - last_timestamp
@@ -396,7 +394,6 @@ class WebMonitorServer:
                         # Format mode if we have enough data
                         mode_text = None
                         if len(power_values) > 1:
-                            from collections import Counter
                             rounded_values = [round(x, 2) for x in power_values]
                             value_counts = Counter(rounded_values)
                             most_common = value_counts.most_common(1)
@@ -418,7 +415,177 @@ class WebMonitorServer:
                 logging.error(f"Error in get_rack_status for {rack_name}: {str(e)}")
                 logging.error(traceback.format_exc())
                 return jsonify({"error": str(e)}), 500
-    
+        
+        @self.flask_app.route('/api/racks/active')
+        def api_active_racks():
+            """API endpoint to get active racks only."""
+            active_racks = []
+            
+            # Use the same logic as the index route to determine active racks
+            data_source = {}
+            if hasattr(self.app, 'monitor_tab') and hasattr(self.app.monitor_tab, 'rack_tabs'):
+                data_source = self.app.monitor_tab.rack_tabs
+            elif hasattr(self.app, 'monitoring_data') and self.app.monitoring_data:
+                data_source = self.app.monitoring_data
+            
+            for rack_key, rack_data in data_source.items():
+                try:
+                    # Parse rack name and address
+                    if '_' in rack_key:
+                        name, address = rack_key.split('_', 1)
+                    else:
+                        name = rack_key
+                        address = "Unknown"
+                    
+                    # Determine if active using the same monitoring signals
+                    is_monitoring = False
+                    status = "Not Monitoring"
+                    
+                    # Check for monitoring task
+                    if hasattr(self.app, 'monitoring_tasks') and rack_key in self.app.monitoring_tasks:
+                        has_task = True
+                        has_monitor = 'monitor' in self.app.monitoring_tasks[rack_key]
+                        
+                        if has_task and has_monitor:
+                            is_monitoring = True
+                    
+                    # Check for recent data
+                    if 'data' in rack_data and rack_data['data']:
+                        has_data = True
+                        
+                        # Special case for G24
+                        if name == "G24" and has_data:
+                            is_monitoring = True
+                        
+                        # Check if in notebook
+                        if 'added_to_notebook' in rack_data and rack_data['added_to_notebook'] and has_data:
+                            is_monitoring = True
+                        
+                        # Check if data is recent (last 5 minutes)
+                        if len(rack_data['data']) > 0:
+                            last_timestamp = rack_data['data'][-1][0]
+                            if isinstance(last_timestamp, datetime.datetime):
+                                time_diff = datetime.datetime.now() - last_timestamp
+                                if time_diff.total_seconds() < 300:  # 5 minutes
+                                    is_monitoring = True
+                
+                    if is_monitoring:
+                        # Check if paused
+                        is_paused = False
+                        
+                        if 'paused' in rack_data:
+                            is_paused = rack_data['paused']
+                        elif 'controls' in rack_data and 'pause_var' in rack_data['controls']:
+                            pause_text = rack_data['controls']['pause_var'].get()
+                            is_paused = (pause_text == "Resume")
+                        elif hasattr(self.app, 'monitoring_tasks') and rack_key in self.app.monitoring_tasks:
+                            if 'paused' in self.app.monitoring_tasks[rack_key]:
+                                is_paused = self.app.monitoring_tasks[rack_key]['paused']
+                        
+                        status = "Paused" if is_paused else "Monitoring"
+                        
+                        # Only add if actually monitoring (not paused)
+                        if status == "Monitoring":
+                            # Get current power if available
+                            current_power = None
+                            if 'data' in rack_data and rack_data['data']:
+                                power_values = [entry[1] for entry in rack_data['data']]
+                                if power_values:
+                                    current_power = f"{power_values[-1]:.2f} W"
+                            
+                            active_racks.append({
+                                'name': name,
+                                'address': address,
+                                'status': status,
+                                'current_power': current_power
+                            })
+                        
+                except Exception as e:
+                    logging.error(f"Error in api_active_racks for rack {rack_key}: {e}")
+            
+            return jsonify({"active_racks": active_racks})
+        
+        @self.flask_app.route('/api/racks/standby')
+        def api_standby_racks():
+            """API endpoint to get standby racks only."""
+            # Similar to active but returns racks that are not monitoring or are paused
+            standby_racks = []
+            
+            # Get data sources
+            data_source = {}
+            if hasattr(self.app, 'monitor_tab') and hasattr(self.app.monitor_tab, 'rack_tabs'):
+                data_source = self.app.monitor_tab.rack_tabs
+            elif hasattr(self.app, 'monitoring_data') and self.app.monitoring_data:
+                data_source = self.app.monitoring_data
+            
+            # Process each rack
+            for rack_key, rack_data in data_source.items():
+                try:
+                    # Parse rack name
+                    if '_' in rack_key:
+                        name, address = rack_key.split('_', 1)
+                    else:
+                        name = rack_key
+                        address = "Unknown"
+                    
+                    # Determine if monitoring using same logic as before
+                    is_monitoring = False
+                    has_task = hasattr(self.app, 'monitoring_tasks') and rack_key in self.app.monitoring_tasks
+                    has_monitor = has_task and 'monitor' in self.app.monitoring_tasks[rack_key]
+                    has_data = 'data' in rack_data and rack_data['data']
+                    in_notebook = 'added_to_notebook' in rack_data and rack_data['added_to_notebook']
+                    
+                    # Check for recent data
+                    has_recent_data = False
+                    if has_data and rack_data['data']:
+                        last_timestamp = rack_data['data'][-1][0]
+                        if isinstance(last_timestamp, datetime.datetime):
+                            time_diff = datetime.datetime.now() - last_timestamp
+                            if time_diff.total_seconds() < 300:
+                                has_recent_data = True
+                    
+                    # Determine monitoring state
+                    is_monitoring = (
+                        (has_task and has_monitor) or
+                        (has_data and in_notebook) or
+                        has_recent_data or
+                        (has_data and name == "G24")
+                    )
+                    
+                    # Check if paused
+                    is_paused = False
+                    if 'paused' in rack_data:
+                        is_paused = rack_data['paused']
+                    elif 'controls' in rack_data and 'pause_var' in rack_data['controls']:
+                        pause_text = rack_data['controls']['pause_var'].get()
+                        is_paused = (pause_text == "Resume")
+                    elif has_task and 'paused' in self.app.monitoring_tasks[rack_key]:
+                        is_paused = self.app.monitoring_tasks[rack_key]['paused']
+                    
+                    # Only add if not actively monitoring (either not monitoring at all or paused)
+                    if not is_monitoring or is_paused:
+                        # Get last power reading if available
+                        last_power = None
+                        if has_data and rack_data['data']:
+                            power_values = [entry[1] for entry in rack_data['data']]
+                            if power_values:
+                                last_power = f"{power_values[-1]:.2f} W"
+                        
+                        status = "Paused" if (is_monitoring and is_paused) else "Not Monitoring"
+                        
+                        standby_racks.append({
+                            'name': name,
+                            'address': address,
+                            'status': status,
+                            'last_power': last_power
+                        })
+        
+                except Exception as e:
+                    logging.error(f"Error in api_standby_racks for rack {rack_key}: {e}")
+            
+            return jsonify({"standby_racks": standby_racks})
+
+
     def start(self):
         """Start the web server in a separate thread."""
         if self.is_running:

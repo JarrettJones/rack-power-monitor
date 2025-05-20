@@ -1,179 +1,232 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rack Power Monitor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-    <header>
-        <h1>Rack Power Monitor</h1>
-    </header>
-    <main>
-        <h2>Monitored Racks</h2>
-        <div class="rack-grid">
-            {% for rack in racks %}
-            <div class="rack-card" data-rack-name="{{ rack.name }}" data-rack-address="{{ rack.address }}">
-                <h3>{{ rack.name }}</h3>
-                <p>Address: {{ rack.address }}</p>
-                <p>Status: <span class="status-badge {{ rack.status.lower() }}" data-status-field>{{ rack.status }}</span></p>
-                
-                <!-- Show current reading prominently if monitoring -->
-                <div class="current-reading" 
-                     {% if rack.status.lower() != 'monitoring' or not rack.stats or not rack.stats.current %}
-                     style="display: none;"
-                     {% endif %}>
-                    <span class="reading-value" data-current-power>{{ rack.stats.current if rack.stats and rack.stats.current else '0.00 W' }}</span>
-                    <span class="reading-label">Current Power</span>
-                </div>
-                
-                <!-- Additional statistics -->
-                <div class="rack-stats" 
-                     {% if not rack.stats %}
-                     style="display: none;"
-                     {% endif %}>
-                    <p class="current-stat" 
-                       {% if rack.status.lower() == 'monitoring' %}
-                       style="display: none;"
-                       {% endif %}>
-                        Current: <strong data-current-stat>{{ rack.stats.current if rack.stats and rack.stats.current else '0.00 W' }}</strong>
-                    </p>
-                    <p class="count-stat">
-                        Readings: <strong data-readings-count>{{ rack.stats.count if rack.stats and rack.stats.count else '0' }}</strong>
-                    </p>
-                    <p class="mode-stat" 
-                       {% if not rack.stats or not rack.stats.mode %}
-                       style="display: none;"
-                       {% endif %}>
-                        Mode: <strong data-mode>{{ rack.stats.mode if rack.stats and rack.stats.mode else 'N/A' }}</strong>
-                    </p>
-                </div>
-                
-                <a href="/rack/{{ rack.name }}" class="view-button">View Details</a>
-            </div>
-            {% else %}
-            <p>No racks are currently being monitored.</p>
-            {% endfor %}
-        </div>
-    </main>
-    <footer>
-        <p>&copy; Microsoft 2025</p>
-    </footer>
-    
     <script>
-        // Wait for the DOM to be loaded
-        document.addEventListener('DOMContentLoaded', function() {
-            // Start auto-refresh
-            startAutoRefresh();
-            
-            // Optional: Add visual indicator that auto-refresh is active
-            const header = document.querySelector('header');
-            const refreshIndicator = document.createElement('div');
-            refreshIndicator.className = 'refresh-indicator';
-            refreshIndicator.innerHTML = 'Auto-refreshing <span class="dots">...</span>';
-            header.appendChild(refreshIndicator);
-            
-            // Animate the dots
-            let dotsState = 0;
-            setInterval(() => {
-                const dots = document.querySelector('.refresh-indicator .dots');
-                dotsState = (dotsState + 1) % 4;
-                dots.textContent = '.'.repeat(dotsState);
-            }, 500);
-        });
+        // Handle refresh timer
+        let refreshTimer;
         
-        // Function to start auto-refresh
-        function startAutoRefresh() {
-            // Refresh every 5 seconds
-            setInterval(updateAllRackData, 5000);
-        }
-        
-        // Function to update all racks on the page
-        function updateAllRackData() {
-            // Get all rack cards
-            const rackCards = document.querySelectorAll('.rack-card');
+        // Function to set the refresh rate
+        function setRefreshRate(seconds) {
+            // Clear any existing timer
+            if (refreshTimer) {
+                clearTimeout(refreshTimer);
+            }
             
-            // Update each rack
-            rackCards.forEach(card => {
-                const rackName = card.dataset.rackName;
-                const rackAddress = card.dataset.rackAddress;
+            // Convert to number
+            const rate = parseInt(seconds);
+            
+            // If rate is valid and not zero, set new timer
+            if (rate > 0) {
+                refreshTimer = setTimeout(function() {
+                    location.reload();
+                }, rate * 1000);
                 
-                updateRackData(card, rackName, rackAddress);
-            });
+                // Save setting to localStorage
+                localStorage.setItem("refreshRate", rate);
+                
+                // Optionally show feedback
+                showRefreshToast(`Page will refresh every ${rate} seconds`);
+            } else {
+                // Auto-refresh disabled
+                localStorage.setItem("refreshRate", "0");
+                showRefreshToast('Auto-refresh turned off');
+            }
         }
         
-        // Function to update a specific rack's data
-        function updateRackData(cardElement, rackName, rackAddress) {
-            // Create the API URL
-            const apiUrl = `/api/rack/${rackName}/status`;
+        // Simple toast notification
+        function showRefreshToast(message) {
+            // Create toast element if it doesn't exist
+            let toast = document.getElementById('refresh-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'refresh-toast';
+                document.body.appendChild(toast);
+            }
             
-            // Fetch updated data
-            fetch(apiUrl)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Network response was not ok');
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    // Update status
-                    const statusElement = cardElement.querySelector('[data-status-field]');
-                    if (statusElement) {
-                        statusElement.textContent = data.status;
-                        statusElement.className = 'status-badge ' + data.status.toLowerCase();
-                    }
-                    
-                    // Update current power display
-                    const currentPowerElement = cardElement.querySelector('[data-current-power]');
-                    const currentStatElement = cardElement.querySelector('[data-current-stat]');
-                    if (data.stats && data.stats.current) {
-                        if (currentPowerElement) currentPowerElement.textContent = data.stats.current;
-                        if (currentStatElement) currentStatElement.textContent = data.stats.current;
-                    }
-                    
-                    // Show/hide current-reading based on monitoring status
-                    const currentReadingDiv = cardElement.querySelector('.current-reading');
-                    if (currentReadingDiv) {
-                        if (data.status.toLowerCase() === 'monitoring' && data.stats && data.stats.current) {
-                            currentReadingDiv.style.display = 'block';
-                        } else {
-                            currentReadingDiv.style.display = 'none';
-                        }
-                    }
-                    
-                    // Show/hide current stat based on monitoring status
-                    const currentStatP = cardElement.querySelector('.current-stat');
-                    if (currentStatP) {
-                        if (data.status.toLowerCase() !== 'monitoring') {
-                            currentStatP.style.display = 'block';
-                        } else {
-                            currentStatP.style.display = 'none';
-                        }
-                    }
-                    
-                    // Update readings count
-                    const readingsCountElement = cardElement.querySelector('[data-readings-count]');
-                    if (readingsCountElement && data.stats && data.stats.count) {
-                        readingsCountElement.textContent = data.stats.count;
-                    }
-                    
-                    // Update mode
-                    const modeElement = cardElement.querySelector('[data-mode]');
-                    const modeStatP = cardElement.querySelector('.mode-stat');
-                    if (modeElement && modeStatP && data.stats) {
-                        if (data.stats.mode) {
-                            modeElement.textContent = data.stats.mode;
-                            modeStatP.style.display = 'block';
-                        } else {
-                            modeStatP.style.display = 'none';
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('Error updating rack data:', error);
-                });
+            // Set message and show toast
+            toast.textContent = message;
+            toast.className = 'toast-visible';
+            
+            // Hide after 3 seconds
+            setTimeout(() => {
+                toast.className = '';
+            }, 3000);
+        }
+        
+        // Function to switch between tabs
+        function openTab(evt, tabName) {
+            var i, tabcontent, tablinks;
+            
+            // Hide all tab content
+            tabcontent = document.getElementsByClassName("tabcontent");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            
+            // Remove active class from all tab buttons
+            tablinks = document.getElementsByClassName("tablinks");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            
+            // Show the current tab and add active class to the button
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+            
+            // Store the active tab in localStorage
+            localStorage.setItem("activeTab", tabName);
+        }
+        
+        // When the page loads
+        window.onload = function() {
+            // Activate the saved tab or default to active
+            const activeTab = localStorage.getItem("activeTab") || "ActiveTab";
+            document.getElementById(activeTab).style.display = "block";
+            document.querySelector('.tablinks[data-tab="' + activeTab + '"]').classList.add("active");
+            
+            // Set refresh rate based on saved preference
+            const savedRate = localStorage.getItem("refreshRate");
+            if (savedRate !== null) {
+                // Update dropdown to match saved preference
+                document.getElementById("refresh-rate").value = savedRate;
+                // Initialize refresh timer
+                setRefreshRate(savedRate);
+            } else {
+                // Default to 30 seconds if no preference saved
+                setRefreshRate(30);
+            }
         }
     </script>
+</head>
+<body>
+    <div class="page-wrapper">
+        <header>
+            <h1>Rack Power Monitor Dashboard</h1>
+        </header>
+        
+        <div class="content-wrapper">
+            <div class="tab-container">
+                <div class="tab">
+                    <button class="tablinks" data-tab="ActiveTab" onclick="openTab(event, 'ActiveTab')">
+                        Active ({{ active_count }})
+                    </button>
+                    <button class="tablinks" data-tab="StandbyTab" onclick="openTab(event, 'StandbyTab')">
+                        Standby ({{ standby_count }})
+                    </button>
+                    
+                    <!-- Add refresh rate control -->
+                    <div class="refresh-control">
+                        <label for="refresh-rate">Auto-refresh:</label>
+                        <select id="refresh-rate" onchange="setRefreshRate(this.value)">
+                            <option value="0">Off</option>
+                            <option value="10">10 seconds</option>
+                            <option value="30" selected>30 seconds</option>
+                            <option value="60">1 minute</option>
+                            <option value="300">5 minutes</option>
+                        </select>
+                        <button id="manual-refresh" onclick="location.reload()" title="Refresh now">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+                                <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <main>
+                <!-- For Active Tab rack cards -->
+                <div id="ActiveTab" class="tabcontent">
+                    <div class="rack-container">
+                        {% if active_racks %}
+                            {% for rack in active_racks %}
+                            <!-- Active rack card with enhanced statistics -->
+                            <div class="rack-card">
+                                <div class="rack-header">
+                                    <h2>{{ rack.name }}</h2>
+                                    <span class="status monitoring">{{ rack.status }}</span>
+                                </div>
+                                <div class="rack-details">
+                                    <p class="address">
+                                        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                            <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 2a6 6 0 0 0-6 6h12a6 6 0 0 0-6-6z"/>
+                                        </svg>
+                                        {{ rack.address }}
+                                    </p>
+                                    {% if rack.stats %}
+                                    <div class="rack-stats">
+                                        <p class="current-power">Current: <strong>{{ rack.stats.current }}</strong></p>
+                                        {% if rack.stats.avg %}
+                                        <p class="avg-power">Average: <strong>{{ rack.stats.avg }}</strong></p>
+                                        {% endif %}
+                                        <p class="readings">{{ rack.stats.count }} readings</p>
+                                    </div>
+                                    {% else %}
+                                    <p class="no-data">No data available</p>
+                                    {% endif %}
+                                    
+                                    <a href="/rack/{{ rack.name }}" class="view-button">View Details</a>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="no-racks">
+                                <p>No racks are currently being monitored.</p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- For Standby Tab rack cards -->
+                <div id="StandbyTab" class="tabcontent">
+                    <div class="rack-container">
+                        {% if standby_racks %}
+                            {% for rack in standby_racks %}
+                            <div class="rack-card">
+                                <div class="rack-header">
+                                    <h2>{{ rack.name }}</h2>
+                                    <span class="status {{ rack.status.lower().replace(' ', '-') }}">{{ rack.status }}</span>
+                                </div>
+                                <div class="rack-details">
+                                    <p class="address">
+                                        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                            <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 2a6 6 0 0 0-6 6h12a6 6 0 0 0-6-6z"/>
+                                        </svg>
+                                        {{ rack.address }}
+                                    </p>
+                                    {% if rack.stats %}
+                                    <div class="rack-stats">
+                                        <p>Last Power: <strong>{{ rack.stats.current }}</strong></p>
+                                        <p>Readings: {{ rack.stats.count }}</p>
+                                        {% if rack.stats.mode %}
+                                        <p>Most Common: {{ rack.stats.mode }}</p>
+                                        {% endif %}
+                                    </div>
+                                    {% else %}
+                                    <p class="no-data">No data available</p>
+                                    {% endif %}
+                                    
+                                    <!-- Add the view button here -->
+                                    <a href="/rack/{{ rack.name }}" class="view-button">View Details</a>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="no-racks">
+                                <p>No standby racks found.</p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </main>
+        </div>
+        
+        <footer>
+            <p>Rack Power Monitor v1.0</p>
+        </footer>
+    </div>
 </body>
 </html>

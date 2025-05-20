@@ -1,46 +1,86 @@
-/* Basic styling */
-html {
+/* Reset body and html */
+html, body {
     height: 100%;
-}
-
-body {
-    font-family: Arial, sans-serif;
-    line-height: 1.6;
-    color: #333;
     margin: 0;
     padding: 0;
-    background-color: #f5f5f5;
-    min-height: 100vh; /* Full viewport height */
-    display: flex;
-    flex-direction: column;
+}
+/* Footer styling - this should be the ONLY footer style in your CSS */
+footer {
+    background-color: #333;
+    color: white;
+    text-align: center;
+    padding: 1rem;
+    width: 100%;
+    margin-top: auto;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    box-sizing: border-box;
+    z-index: 100;
 }
 
+/* Add padding to main content to prevent footer overlap */
+body {
+    padding-bottom: 60px; /* Adjust based on your footer height */
+}
+
+/* Set up the body as a flex container */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    background-color: #f8f9fa;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh; /* At least full viewport height */
+    padding-bottom: 60px;
+}
+
+/* Header remains the same */
 header {
-    background-color: #0078d7;
+    background-color: #2196F3;
     color: white;
-    padding: 1rem;
+    padding: 1.5rem 2rem;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 }
 
 header h1 {
     margin: 0;
+    font-size: 1.8rem;
+    font-weight: 500;
+}
+
+main, .content-wrapper {
+    flex: 1 0 auto; /* This is the key property */
+    width: 100%;
 }
 
 main {
     max-width: 1200px;
     margin: 0 auto;
     padding: 2rem;
-    flex: 1; /* This makes main expand to push footer down */
+    box-sizing: border-box;
 }
 
-footer {
-    background-color: #333;
-    color: white;
-    text-align: center;
-    padding: 1rem;
-    /* Remove margin-top to avoid extra space */
-    margin-top: 0;
+
+/* Clear conflicting/duplicate properties */
+.content {
+    width: 100%;
 }
+
+/* All your non-footer content should be in a container with this class */
+.content {
+    flex: 1 0 auto;
+}
+
+/* Simple fix for footer positioning */
+.content-wrapper,
+main {
+    flex: 1;
+}
+
+
+
 
 /* Rack grid */
 .rack-grid {
@@ -61,6 +101,163 @@ footer {
     width: 320px; /* Fixed width for each card */
     flex-grow: 0; /* Don't allow cards to grow */
     flex-shrink: 0; /* Don't allow cards to shrink */
+}
+
+/* Add or update these CSS rules */
+
+/* Container for the rack cards */
+.rack-container {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    padding: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+/* Individual rack card */
+.rack-card {
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    border: 1px solid #e0e0e0;
+}
+
+.rack-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.rack-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    border-bottom: 1px solid #f0f0f0;
+    padding-bottom: 8px;
+}
+
+.rack-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: #333;
+}
+
+.rack-header a {
+    text-decoration: none;
+    color: #2196F3;
+}
+
+.rack-header a:hover {
+    text-decoration: underline;
+}
+
+.status {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.monitoring {
+    background-color: #4CAF50;
+    color: white;
+}
+
+.paused {
+    background-color: #FF9800;
+    color: white;
+}
+
+.not-monitoring {
+    background-color: #9E9E9E;
+    color: white;
+}
+
+.rack-details {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.rack-stats {
+    margin-top: 0;
+    margin-bottom: auto;
+    background-color: #f9f9f9;
+    padding: 12px;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Style for current power */
+.rack-stats p:first-child {
+    border-left: 4px solid #4CAF50;
+    padding-left: 8px;
+}
+
+/* Style for average power */
+.rack-stats p:nth-child(2) {
+    border-left: 4px solid #2196F3;
+    padding-left: 8px;
+}
+
+/* Style for readings count */
+.rack-stats p:nth-child(3) {
+    font-size: 0.8rem;
+    color: #757575;
+    text-align: right;
+    margin-top: 4px;
+}
+
+.rack-stats p {
+    margin: 6px 0;
+    font-size: 0.9rem;
+    color: #555;
+}
+
+.rack-stats strong {
+    color: #333;
+    font-size: 1.1rem;
+}
+
+.no-racks {
+    grid-column: span 3;
+    text-align: center;
+    padding: 40px 0;
+    color: #757575;
+    font-style: italic;
+    background-color: #f5f5f5;
+    border-radius: 8px;
+}
+
+/* Responsive grid adjustments */
+@media (max-width: 992px) {
+    .rack-container {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .no-racks {
+        grid-column: span 2;
+    }
+}
+
+@media (max-width: 576px) {
+    .rack-container {
+        grid-template-columns: 1fr;
+    }
+    
+    .no-racks {
+        grid-column: span 1;
+    }
 }
 
 /* Responsive adjustments */
@@ -94,13 +291,26 @@ footer {
 }
 
 .view-button {
-    display: inline-block;
+    display: block;
+    width: 100%;
     background-color: #0078d7;
     color: white;
-    padding: 0.5rem 1rem;
+    padding: 10px 16px;
     text-decoration: none;
     border-radius: 4px;
-    margin-top: 1rem;
+    margin-top: 16px;
+    text-align: center;
+    box-sizing: border-box;
+    transition: all 0.2s ease;
+    font-weight: 500;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.view-button:hover {
+    background-color: #0063b1;
+    color: white;
+    text-decoration: none;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
 }
 
 /* Chart section */
@@ -230,4 +440,203 @@ button:hover {
     background-color: rgba(0,0,0,0.2);
     padding: 4px 8px;
     border-radius: 4px;
+}
+
+/* Tab container and styling */
+.tab-container {
+    padding: 0 20px;
+    margin-bottom: 0;
+    margin-top: 20px;
+}
+
+.tab {
+    display: flex;
+    align-items: center;
+    border-bottom: 2px solid #e0e0e0;
+    padding: 0 0 8px 0;
+}
+
+.tab button {
+    background-color: transparent;
+    border: none;
+    outline: none;
+    cursor: pointer;
+    padding: 12px 16px;
+    transition: 0.3s;
+    position: relative;
+    margin-right: 4px;
+    font-size: 15px;
+    color: #555;
+}
+
+.tab button::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    width: 0;
+    height: 3px;
+    background-color: #2196F3;
+    transition: width 0.3s ease;
+}
+
+.tab button:hover {
+    background-color: #f5f5f5;
+    color: #333;
+}
+
+.tab button.active {
+    color: #2196F3;
+    background-color: transparent;
+    border-bottom: none;
+}
+
+.tab button.active::after {
+    width: 100%;
+}
+
+.tabcontent {
+    display: none;
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Shared styling for both tabs */
+.address {
+    color: #757575;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 8px 0 16px;
+    font-size: 0.9rem;
+}
+
+.no-data {
+    text-align: center;
+    margin-top: auto;
+    padding: 20px 0;
+    color: #9e9e9e;
+    font-style: italic;
+}
+
+/* Ensure consistent rack card heights */
+.rack-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 250px;
+}
+
+.rack-details {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.rack-stats {
+    margin-top: 0;
+    margin-bottom: auto;
+}
+
+.view-button {
+    margin-top: auto;
+}
+
+/* Add this to your existing CSS */
+.rack-stats p.avg-power {
+    color: #555;
+    border-left: 3px solid #7986CB;
+    padding-left: 8px;
+    margin-top: 8px;
+}
+
+.rack-stats p.avg-power strong {
+    color: #3949AB;
+}
+
+/* Refresh rate control styling */
+.refresh-control {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #555;
+    font-size: 0.9rem;
+}
+
+.refresh-control label {
+    margin-bottom: 0;
+}
+
+.refresh-control select {
+    padding: 4px 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background-color: white;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+/* Toast notification for refresh rate changes */
+#refresh-toast {
+    position: fixed;
+    bottom: 80px; /* Position above the footer */
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 4px;
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.3s ease-in-out;
+    z-index: 1000;
+    pointer-events: none; /* Don't capture mouse events */
+}
+
+#refresh-toast.toast-visible {
+    opacity: 1;
+}
+
+/* Update the tab bar to accommodate the control */
+.tab {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding-right: 10px;
+}
+
+@media (max-width: 768px) {
+    .refresh-control {
+        margin-left: 0;
+        margin-top: 10px;
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
+
+#manual-refresh {
+    background-color: transparent;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+}
+
+#manual-refresh:hover {
+    background-color: #f0f0f0;
+}
+
+#manual-refresh svg {
+    display: block;
+    color: #555;
 }
