@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 import threading
 import webbrowser
 import os
@@ -32,121 +32,62 @@ class WebMonitorServer:
         
         @self.flask_app.route('/')
         def index():
-            # Set up empty rack lists
+            """Main index page that shows all racks."""
+            # FIXED: Use get_all_racks() to get consistent status information
+            all_racks = []
+            if hasattr(self.app, 'get_all_racks'):
+                all_racks = self.app.get_all_racks()
+            
+            # Enhance rack data with stats from existing API
+            for rack in all_racks:
+                try:
+                    # Use your existing endpoint logic to get stats
+                    rack_name = rack['name']
+                    rack_key = f"{rack_name}_{rack['address']}"
+                    
+                    # Initialize stats
+                    rack['stats'] = {
+                        'current': None,
+                        'avg': None,
+                        'count': '0'
+                    }
+                    
+                    # Check if we have stats in rack_tabs
+                    if hasattr(self.app, 'monitor_tab') and hasattr(self.app.monitor_tab, 'rack_tabs'):
+                        if rack_key in self.app.monitor_tab.rack_tabs:
+                            tab_data = self.app.monitor_tab.rack_tabs[rack_key]
+                            
+                            # Get power data points
+                            if 'data' in tab_data and tab_data['data']:
+                                power_values = [entry[1] for entry in tab_data['data']]
+                                
+                                if power_values:
+                                    # Current power (last reading)
+                                    rack['stats']['current'] = f"{power_values[-1]:.2f} W"
+                                    
+                                    # Average
+                                    avg = sum(power_values) / len(power_values)
+                                    rack['stats']['avg'] = f"{avg:.2f} W"
+                                    
+                                    # Count
+                                    rack['stats']['count'] = str(len(power_values))
+                except Exception as e:
+                    import logging
+                    logging.error(f"Error enhancing rack data for {rack['name']}: {str(e)}")
+            
+            # Separate into active and standby
             active_racks = []
             standby_racks = []
             
-            # Get data sources 
-            data_source = {}
-            if hasattr(self.app, 'monitor_tab') and hasattr(self.app.monitor_tab, 'rack_tabs'):
-                data_source = self.app.monitor_tab.rack_tabs
-            elif hasattr(self.app, 'monitoring_data') and self.app.monitoring_data:
-                data_source = self.app.monitoring_data
+            for rack in all_racks:
+                # Only consider "Monitoring" as active, all other statuses go to standby
+                if rack['status'] == "Monitoring":
+                    # Add to active_racks
+                    active_racks.append(rack)
+                else:
+                    # Add to standby_racks
+                    standby_racks.append(rack)
             
-            # Process each rack
-            for rack_key, rack_data in data_source.items():
-                # Parse rack name
-                if '_' in rack_key:
-                    name, address = rack_key.split('_', 1)
-                else:
-                    name = rack_key
-                    address = "Unknown"
-                
-                # Multiple signals that a rack might be monitored
-                signals = {
-                    "has_monitor_task": False,
-                    "has_monitor_object": False,
-                    "has_data": False,
-                    "in_notebook": False,
-                    "recent_data": False
-                }
-                
-                # Check for monitoring task
-                if hasattr(self.app, 'monitoring_tasks') and rack_key in self.app.monitoring_tasks:
-                    signals["has_monitor_task"] = True
-                    if 'monitor' in self.app.monitoring_tasks[rack_key]:
-                        signals["has_monitor_object"] = True
-                
-                # Check for data
-                if 'data' in rack_data and rack_data['data']:
-                    signals["has_data"] = True
-                    
-                    # Check if data is recent (last 5 minutes)
-                    if len(rack_data['data']) > 0:
-                        last_timestamp = rack_data['data'][-1][0]
-                        if isinstance(last_timestamp, datetime.datetime):
-                            time_diff = datetime.datetime.now() - last_timestamp
-                            if time_diff.total_seconds() < 300:  # 5 minutes
-                                signals["recent_data"] = True
-                
-                # Check if in notebook
-                if 'added_to_notebook' in rack_data:
-                    signals["in_notebook"] = rack_data['added_to_notebook']
-                
-                # Determine status based on signals
-                status = "Not Monitoring"
-                is_monitoring = (
-                    (signals["has_monitor_task"] and signals["has_monitor_object"]) or
-                    (signals["has_data"] and signals["in_notebook"]) or
-                    signals["recent_data"] or
-                    (signals["has_data"] and name == "G24")  # Special case for G24
-                )
-                
-                if is_monitoring:
-                    # Check if paused
-                    is_paused = False
-                    
-                    # Check rack_data directly
-                    if 'paused' in rack_data:
-                        is_paused = rack_data['paused']
-                    
-                    # Check pause button state
-                    elif 'controls' in rack_data and 'pause_var' in rack_data['controls']:
-                        pause_text = rack_data['controls']['pause_var'].get()
-                        is_paused = (pause_text == "Resume")
-                    
-                    # Also check monitoring_tasks
-                    if not is_paused and hasattr(self.app, 'monitoring_tasks') and rack_key in self.app.monitoring_tasks:
-                        if 'paused' in self.app.monitoring_tasks[rack_key]:
-                            is_paused = self.app.monitoring_tasks[rack_key]['paused']
-                    
-                    status = "Paused" if is_paused else "Monitoring"
-        
-                # For active racks, calculate additional statistics
-                if status == "Monitoring":
-                    # Get power values from data
-                    power_values = []
-                    if 'data' in rack_data and rack_data['data']:
-                        power_values = [entry[1] for entry in rack_data['data'] if isinstance(entry, (list, tuple)) and len(entry) > 1]
-                    
-                    # Calculate statistics
-                    current_power = None
-                    avg_power = None
-                    count = len(power_values)
-                    
-                    if power_values:
-                        current_power = f"{power_values[-1]:.2f} W"
-                        avg_power = f"{sum(power_values) / count:.2f} W"
-                    
-                    # Add to active racks with stats
-                    active_racks.append({
-                        'name': name,
-                        'address': address,
-                        'status': status,
-                        'stats': {
-                            'current': current_power,
-                            'avg': avg_power,
-                            'count': count
-                        }
-                    })
-                else:
-                    # Add to the standby racks
-                    standby_racks.append({
-                        'name': name,
-                        'address': address,
-                        'status': status
-                    })
-        
             # Sort racks by name for consistent display
             active_racks.sort(key=lambda x: x['name'])
             standby_racks.sort(key=lambda x: x['name'])
@@ -159,6 +100,7 @@ class WebMonitorServer:
             return render_template('index.html', 
                                   active_racks=active_racks,
                                   standby_racks=standby_racks,
+                                  all_racks=all_racks,
                                   active_count=active_count,
                                   standby_count=standby_count)
             
@@ -584,8 +526,214 @@ class WebMonitorServer:
                     logging.error(f"Error in api_standby_racks for rack {rack_key}: {e}")
             
             return jsonify({"standby_racks": standby_racks})
+        
+        # Add these routes to your Flask app
 
+        @self.flask_app.route('/api/rscm/add', methods=['POST'])
+        def add_rscm():
+            """Add a new R-SCM device."""
+            try:
+                rack_name = request.form.get('rack_name')
+                ip_address = request.form.get('ip_address')
+                username = request.form.get('username') or None
+                password = request.form.get('password') or None
+                auto_monitor = request.form.get('auto_monitor') == 'true'
+                poll_rate = int(request.form.get('poll_rate', 60))
+                
+                # Validation
+                if not rack_name or not ip_address:
+                    return jsonify({"success": False, "message": "Rack name and IP address are required"})
+                
+                # Add to the main application
+                if hasattr(self.app, 'add_rscm'):
+                    success = self.app.add_rscm(rack_name, ip_address, username, password, auto_monitor, poll_rate)
+                    if success:
+                        return jsonify({"success": True, "message": "R-SCM added successfully"})
+                    else:
+                        return jsonify({"success": False, "message": "Failed to add R-SCM (already exists or invalid data)"})
+                else:
+                    return jsonify({"success": False, "message": "R-SCM management not available in this application"})
+            
+            except Exception as e:
+                self.app.logger.error(f"Error adding R-SCM: {str(e)}")
+                return jsonify({"success": False, "message": f"Error: {str(e)}"})
 
+        @self.flask_app.route('/api/rscm/update', methods=['POST'])
+        def update_rscm():
+            """Update an existing R-SCM device."""
+            try:
+                original_rack_name = request.form.get('original_rack_name')
+                rack_name = request.form.get('rack_name')
+                ip_address = request.form.get('ip_address')
+                
+                print(f"Update request: Original={original_rack_name}, New={rack_name}, IP={ip_address}")
+                
+                # Call the app method with the original rack name
+                if hasattr(self.app, 'update_rscm'):
+                    success = self.app.update_rscm(original_rack_name, rack_name, ip_address)
+                    print(f"Update result: {success}")
+                    return jsonify({
+                        'success': success,
+                        'message': 'R-SCM updated successfully' if success else 'Failed to update R-SCM'
+                    })
+                else:
+                    print("Application doesn't have update_rscm method")
+                    return jsonify({
+                        'success': False,
+                        'message': 'The application does not support updating R-SCMs'
+                    })
+            except Exception as e:
+                print(f"Error in update_rscm: {e}")
+                return jsonify({
+                    'success': False,
+                    'message': f'Error: {str(e)}'
+                })
+
+        @self.flask_app.route('/api/rscm/delete/<rack_name>', methods=['POST'])
+        def delete_rscm(rack_name):
+            """Delete an R-SCM device."""
+            try:
+                # Delete from the main application
+                if hasattr(self.app, 'delete_rscm'):
+                    success = self.app.delete_rscm(rack_name)
+                    if success:
+                        return jsonify({"success": True, "message": "R-SCM deleted successfully"})
+                    else:
+                        return jsonify({"success": False, "message": "Failed to delete R-SCM (not found)"})
+                else:
+                    return jsonify({"success": False, "message": "R-SCM management not available in this application"})
+            
+            except Exception as e:
+                self.app.logger.error(f"Error deleting R-SCM: {str(e)}")
+                return jsonify({"success": False, "message": f"Error: {str(e)}"})
+
+        @self.flask_app.route('/api/rscm/start/<rack_name>', methods=['POST'])
+        def start_monitoring(rack_name):
+            """Start monitoring for an R-SCM."""
+            try:
+                if hasattr(self.app, 'start_monitoring'):
+                    success = self.app.start_monitoring(rack_name)
+                    if success:
+                        return jsonify({"success": True, "message": "Monitoring started"})
+                    else:
+                        return jsonify({"success": False, "message": "Failed to start monitoring"})
+                else:
+                    return jsonify({"success": False, "message": "Monitoring control not available"})
+            
+            except Exception as e:
+                self.app.logger.error(f"Error starting monitoring: {str(e)}")
+                return jsonify({"success": False, "message": f"Error: {str(e)}"})
+
+        @self.flask_app.route('/api/rscm/pause/<rack_name>', methods=['POST'])
+        def pause_monitoring(rack_name):
+            """Pause monitoring for an R-SCM."""
+            try:
+                if hasattr(self.app, 'pause_monitoring'):
+                    success = self.app.pause_monitoring(rack_name)
+                    if success:
+                        return jsonify({"success": True, "message": "Monitoring paused"})
+                    else:
+                        return jsonify({"success": False, "message": "Failed to pause monitoring"})
+                else:
+                    return jsonify({"success": False, "message": "Monitoring control not available"})
+            
+            except Exception as e:
+                self.app.logger.error(f"Error pausing monitoring: {str(e)}")
+                return jsonify({"success": False, "message": f"Error: {str(e)}"})
+
+        @self.flask_app.route('/api/rscm/info/<rack_name>')
+        def get_rscm_info(rack_name):
+            """Get information about a specific R-SCM."""
+            try:
+                if hasattr(self.app, 'get_rscm_info'):
+                    rscm_info = self.app.get_rscm_info(rack_name)
+                    if rscm_info:
+                        return jsonify({"success": True, "rscm": rscm_info})
+                    else:
+                        return jsonify({"success": False, "message": "R-SCM not found"})
+                else:
+                    return jsonify({"success": False, "message": "R-SCM information not available"})
+            
+            except Exception as e:
+                self.app.logger.error(f"Error getting R-SCM info: {str(e)}")
+                return jsonify({"success": False, "message": f"Error: {str(e)}"})
+        
+        # Add or update this route in your WebMonitorServer class setup_routes method
+        @self.flask_app.route('/api/rscm/<rack_name>', methods=['GET'])
+        def get_rscm(rack_name):
+            """Get details for a specific R-SCM."""
+            try:
+                # URL decode the rack name (important for names with spaces)
+                import urllib.parse
+                decoded_name = urllib.parse.unquote(rack_name)
+                
+                # Get RSCM details from the app
+                if hasattr(self.app, 'get_rscm_info'):
+                    rscm_info = self.app.get_rscm_info(decoded_name)
+                    if rscm_info:
+                        return jsonify({
+                            'success': True,
+                            'rscm': rscm_info
+                        })
+                    else:
+                        return jsonify({
+                            'success': False,
+                            'message': f'R-SCM {decoded_name} not found'
+                        })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'message': 'The application does not support retrieving R-SCM details'
+                    })
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'message': f'Error: {str(e)}'
+                })
+        
+        @self.flask_app.route('/api/debug/status', methods=['GET'])
+        def debug_status():
+            """Debug endpoint to get detailed status information."""
+            try:
+                result = {
+                    'tree_status': [],
+                    'monitoring_tasks': [],
+                    'rack_tabs': []
+                }
+                
+                # Get tree status
+                if hasattr(self.app, 'monitor_tab'):
+                    for item_id in self.app.monitor_tab.rscm_tree.get_children():
+                        item = self.app.monitor_tab.rscm_tree.item(item_id)
+                        result['tree_status'].append({
+                            'rack_name': item['values'][0],
+                            'ip_address': item['values'][1],
+                            'status': item['values'][2]
+                        })
+                    
+                    # Get monitoring tasks
+                    if hasattr(self.app.monitor_tab, 'monitoring_tasks'):
+                        for key, value in self.app.monitor_tab.monitoring_tasks.items():
+                            result['monitoring_tasks'].append({
+                                'key': key,
+                                'stop_flag': value.get('stop_flag', False) if isinstance(value, dict) else 'unknown'
+                            })
+                    
+                    # Get rack tabs
+                    if hasattr(self.app.monitor_tab, 'rack_tabs'):
+                        for key in self.app.monitor_tab.rack_tabs.keys():
+                            result['rack_tabs'].append(key)
+                
+                return jsonify({
+                    'success': True,
+                    'debug_info': result
+                })
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'message': f'Error retrieving debug info: {str(e)}'
+                })
+        
     def start(self):
         """Start the web server in a separate thread."""
         if self.is_running:

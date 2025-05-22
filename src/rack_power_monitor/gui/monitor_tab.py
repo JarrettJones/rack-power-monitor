@@ -359,8 +359,8 @@ class MonitorTab(ttk.Frame):
             messagebox.showinfo("Not Monitoring", f"{name} is not currently being monitored")
             return
         
-        # Stop monitoring
-        self._stop_rack_monitoring(name, address)
+        # Stop monitoring WITH confirmation instead of direct stop
+        self._stop_rack_monitoring_with_confirmation(name, address)
 
     def _stop_monitoring(self):
         """Stop all monitoring processes."""
@@ -385,16 +385,22 @@ class MonitorTab(ttk.Frame):
         """Stop monitoring for a specific rack."""
         rack_key = f"{rack_name}_{rack_address}"
         
+        # Add debug logging
+        logger.info(f"[DEBUG] _stop_rack_monitoring called for {rack_name} ({rack_address})")
+        
         if rack_key not in self.monitoring_tasks:
+            logger.info(f"[DEBUG] {rack_name} is not currently in monitoring_tasks")
             self.log_message(f"{rack_name} is not currently being monitored")
             return
-                
+        
         # Set flag to indicate manual stopping
         if rack_key in self.monitoring_status:
             self.monitoring_status[rack_key] = False
+            logger.info(f"[DEBUG] Set monitoring_status to False for {rack_key}")
         
-        # Update status
-        self._update_rack_status(rack_name, rack_address, "Stopping")
+        # Update status FIRST - this is important for web interface
+        self._update_rack_status(rack_name, rack_address, "Complete")
+        logger.info(f"[DEBUG] Updated status to Complete for {rack_name}")
         
         # Stop the monitor and cancel the future
         task_info = self.monitoring_tasks.get(rack_key, {})
@@ -405,39 +411,46 @@ class MonitorTab(ttk.Frame):
                 # Set the stop_requested flag on the monitor
                 task_info['monitor'].stop_requested = True
                 self.log_message(f"Stop flag set for {rack_name}")
+                logger.info(f"[DEBUG] Set stop_requested flag on monitor")
                 
             # Cancel the future if it exists
             if 'future' in task_info and task_info['future']:
                 task_info['future'].cancel()
                 self.log_message(f"Future cancelled for {rack_name}")
+                logger.info(f"[DEBUG] Cancelled future")
                 
-            self.log_message(f"Stopping monitoring for {rack_name} ({rack_address})")
-            
-            # Update status to reflect stopping
-            self._update_rack_status(rack_name, rack_address, "Stopped")
         except Exception as e:
             error_msg = str(e) if str(e) else "Task was already cancelled"
             self.log_message(f"Error while stopping monitoring for {rack_name}: {error_msg}", level="WARNING")
-        
-        # Clean up the task regardless of any errors
+            logger.error(f"[DEBUG] Exception during stop: {error_msg}")
+    
+        # IMPORTANT: Always remove from monitoring_tasks
+        # This is critical for the web interface to show correct status
         if rack_key in self.monitoring_tasks:
             del self.monitoring_tasks[rack_key]
+            logger.info(f"[DEBUG] Removed {rack_key} from monitoring_tasks")
+        else:
+            logger.info(f"[DEBUG] {rack_key} not found in monitoring_tasks")
         
         if rack_key in self.monitoring_status:
             del self.monitoring_status[rack_key]
+            logger.info(f"[DEBUG] Removed {rack_key} from monitoring_status")
         
-        # FIXED: Only remove the specific tab for this rack
+        # Remove the rack tab if it exists
         if rack_key in self.rack_tabs and self.rack_tabs[rack_key].get('added_to_notebook', False):
             try:
                 tab_idx = self.rack_notebook.index(self.rack_tabs[rack_key]['tab'])
                 self.rack_notebook.forget(tab_idx)
                 self.rack_tabs[rack_key]['added_to_notebook'] = False
+                logger.info(f"[DEBUG] Removed tab for {rack_name}")
             except (ValueError, tkinter.TclError) as e:
                 self.log_message(f"Could not remove tab for {rack_name}: {str(e)}", level="WARNING")
-        
+                logger.error(f"[DEBUG] Error removing tab: {e}")
+    
         # Update global monitoring state if no tasks left
         if not self.monitoring_tasks:
             self.monitoring_active = False
+            logger.info("[DEBUG] All monitoring stopped")
             
             # Show the instructions frame only if no more tabs
             if not self.rack_notebook.tabs():
@@ -451,6 +464,8 @@ class MonitorTab(ttk.Frame):
                     active_name = parts[0]
                     self.rack_notebook.add(self.rack_tabs[active_key]['tab'], text=active_name)
                     self.rack_tabs[active_key]['added_to_notebook'] = True
+                    logger.info(f"[DEBUG] Added tab for {active_name}")
+
 
     def _update_rack_status(self, rack_name, rack_address, status):
         """Update the status of a rack in the tree."""
@@ -534,7 +549,31 @@ class MonitorTab(ttk.Frame):
             rack_key = f"{rack_name}_{rack_address}"
             if rack_key not in self.rack_tabs:
                 self._create_rack_tab_without_showing(rack_name, rack_address)
-            
+        
+            # IMPORTANT: Clear existing data when starting a new monitoring session
+            # This is the key change we're making
+            if rack_key in self.rack_tabs:
+                # Reset data to an empty list
+                self.rack_tabs[rack_key]['data'] = []
+                
+                # Clear the chart
+                self.rack_tabs[rack_key]['axes'].clear()
+                self.rack_tabs[rack_key]['axes'].set_title(f"Power Usage for {rack_name} ({rack_address})")
+                self.rack_tabs[rack_key]['axes'].set_xlabel("Time")
+                self.rack_tabs[rack_key]['axes'].set_ylabel("Power (W)")
+                self.rack_tabs[rack_key]['axes'].grid(True)
+                self.rack_tabs[rack_key]['canvas'].draw_idle()
+                
+                # Reset statistics
+                self.rack_tabs[rack_key]['stats']['current'].set("0 W")
+                self.rack_tabs[rack_key]['stats']['min'].set("0 W")
+                self.rack_tabs[rack_key]['stats']['max'].set("0 W")
+                self.rack_tabs[rack_key]['stats']['avg'].set("0 W")
+                self.rack_tabs[rack_key]['stats']['mode'].set("0 W")
+                self.rack_tabs[rack_key]['stats']['count'].set("0")
+                
+                self.log_message(f"Cleared previous data for {rack_name}")
+        
             # Remove the instructions frame if it is visible
             self._toggle_instructions_visibility(show_instructions=False)
 

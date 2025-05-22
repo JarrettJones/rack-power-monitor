@@ -116,8 +116,11 @@
                     <button class="tablinks" data-tab="StandbyTab" onclick="openTab(event, 'StandbyTab')">
                         Standby ({{ standby_count }})
                     </button>
+                    <button class="tablinks" data-tab="ManageTab" onclick="openTab(event, 'ManageTab')">
+                        Manage R-SCMs
+                    </button>
                     
-                    <!-- Add refresh rate control -->
+                    <!-- Refresh control remains unchanged -->
                     <div class="refresh-control">
                         <label for="refresh-rate">Auto-refresh:</label>
                         <select id="refresh-rate" onchange="setRefreshRate(this.value)">
@@ -221,6 +224,91 @@
                         {% endif %}
                     </div>
                 </div>
+                
+                <!-- For Manage R-SCMs Tab (newly added) -->
+                <div id="ManageTab" class="tabcontent">
+                    <div class="manage-section">
+        <h2>Manage R-SCMs</h2>
+        
+        <!-- Add new R-SCM form -->
+        <div class="card">
+            <h3>Add New R-SCM</h3>
+            <form id="add-rscm-form" method="POST" action="/api/rscm/add">
+    <div class="form-row">
+        <div class="form-group">
+            <label for="rack_name">Rack Name:</label>
+            <input type="text" id="rack_name" name="rack_name" required placeholder="e.g., G24">
+        </div>
+        <div class="form-group">
+            <label for="ip_address">IP Address:</label>
+            <input type="text" id="ip_address" name="ip_address" required placeholder="e.g., 192.168.1.100">
+        </div>
+    </div>
+    
+    <div class="form-actions">
+        <button type="submit" class="primary-button">Add R-SCM</button>
+        <button type="reset" class="secondary-button">Reset</button>
+    </div>
+</form>
+            <div id="form-status" class="status-message"></div>
+        </div>
+        
+        <!-- Existing R-SCMs List -->
+        <div class="card mt-4">
+            <h3>Configured R-SCMs</h3>
+            <div class="rscm-list">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Rack Name</th>
+                            <th>IP Address</th>
+                            <th>Status</th>
+                            <!-- Last Reading column removed -->
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rscm-table-body">
+                        {% if all_racks %}
+                            {% for rack in all_racks %}
+                            <tr>
+                                <td>{{ rack.name }}</td>
+                                <td>{{ rack.address }}</td>
+                                <td>
+                                    <span class="status {{ rack.status.lower().replace(' ', '-') }}">
+                                        {{ rack.status }}
+                                    </span>
+                                </td>
+                                <!-- Last Reading column data removed -->
+                                <td class="actions">
+                                    <!-- Buttons remain unchanged -->
+                                    <button onclick="editRSCM('{{ rack.name }}')" class="action-btn edit">
+                                        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                            <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/>
+                                        </svg>
+                                        Edit
+                                    </button>
+                                    <button onclick="deleteRSCM('{{ rack.name }}')" class="action-btn delete">
+                                        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                            <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                                            <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                                        </svg>
+                                        Delete
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="4" class="no-data">No R-SCMs configured yet</td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+                
             </main>
         </div>
         
@@ -228,5 +316,199 @@
             <p>Rack Power Monitor v1.0</p>
         </footer>
     </div>
+    
+    <!-- Add this at the end of your HTML, before the closing body tag -->
+    <script>
+        // Handle form submission via AJAX
+        document.getElementById('add-rscm-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const formStatus = document.getElementById('form-status');
+            
+            fetch('/api/rscm/add', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    formStatus.className = 'status-message success';
+                    formStatus.textContent = 'R-SCM added successfully!';
+                    this.reset();
+                    
+                    // Reload the page after a short delay to show the updated list
+                    setTimeout(() => {
+                        location.reload();
+                    }, 1500);
+                } else {
+                    formStatus.className = 'status-message error';
+                    formStatus.textContent = data.message || 'Failed to add R-SCM';
+                }
+            })
+            .catch(error => {
+                formStatus.className = 'status-message error';
+                formStatus.textContent = 'An error occurred while submitting the form';
+                console.error('Error:', error);
+            });
+        });
+        
+        // Toggle monitoring status
+        function toggleMonitoring(rackName, start) {
+            fetch(`/api/rscm/${start ? 'start' : 'pause'}/${rackName}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Reload to show updated status
+                    location.reload();
+                } else {
+                    alert(data.message || `Failed to ${start ? 'start' : 'pause'} monitoring`);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred');
+            });
+        }
+        
+        // Delete R-SCM
+        function deleteRSCM(rackName) {
+            if (confirm(`Are you sure you want to delete ${rackName}? This action cannot be undone.`)) {
+                fetch(`/api/rscm/delete/${rackName}`, {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Reload to show updated list
+                        location.reload();
+                    } else {
+                        alert(data.message || 'Failed to delete R-SCM');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred');
+                });
+            }
+        }
+        
+        // Edit R-SCM - Fixed version
+        function editRSCM(rackName) {
+            // Create modal if it doesn't exist
+            let modal = document.getElementById('edit-modal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'edit-modal';
+                modal.className = 'modal';
+                document.body.appendChild(modal);
+            }
+            
+            // Set modal content
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <span class="close-modal">&times;</span>
+                    <h3>Edit R-SCM</h3>
+                    <form id="edit-rscm-form">
+                        <input type="hidden" id="original-rack-name" name="original_rack_name">
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="edit-rack-name">Rack Name:</label>
+                                <input type="text" id="edit-rack-name" name="rack_name" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-ip-address">IP Address:</label>
+                                <input type="text" id="edit-ip-address" name="ip_address" required>
+                            </div>
+                        </div>
+                        
+                        <div class="form-actions">
+                            <button type="submit" class="primary-button">Update R-SCM</button>
+                            <button type="button" class="secondary-button close-btn">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            
+            console.log("Getting RSCM details for:", rackName);
+            
+            // Get RSCM details - using encodeURIComponent to handle spaces and special characters
+            fetch(`/api/rscm/${encodeURIComponent(rackName)}`)
+            .then(response => {
+                console.log("Response status:", response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log("API response:", data);
+                if (data.success) {
+                    const rscm = data.rscm;
+                    
+                    // Store the original rack name to identify which rack to update
+                    document.getElementById('original-rack-name').value = rackName;
+                    
+                    // Fill the form with data
+                    document.getElementById('edit-rack-name').value = rscm.name;
+                    document.getElementById('edit-ip-address').value = rscm.address;
+                    
+                    // Show the modal
+                    modal.style.display = 'block';
+                    
+                    // Setup form submission
+                    document.getElementById('edit-rscm-form').addEventListener('submit', function(e) {
+                        e.preventDefault();
+                        
+                        const formData = new FormData(this);
+                        
+                        fetch('/api/rscm/update', {
+                            method: 'POST',
+                            body: formData
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                // Close modal
+                                modal.style.display = 'none';
+                                
+                                // Reload the page to show changes
+                                location.reload();
+                            } else {
+                                alert('Error updating R-SCM: ' + (data.message || 'Unknown error'));
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            alert('Error updating R-SCM. Please check console for details.');
+                        });
+                    }, { once: true }); // Add once:true to prevent multiple event handlers
+                    
+                    // Close modal when clicking the X or Cancel button
+                    document.querySelector('.close-modal').addEventListener('click', function() {
+                        modal.style.display = 'none';
+                    });
+                    
+                    document.querySelector('.close-btn').addEventListener('click', function() {
+                        modal.style.display = 'none';
+                    });
+                } else {
+                    alert('Error fetching R-SCM details: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error fetching R-SCM details. Please check console for details.');
+            });
+        }
+        
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('edit-modal');
+            if (modal && event.target == modal) {
+                modal.style.display = 'none';
+            }
+        };
+    </script>
 </body>
 </html>

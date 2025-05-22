@@ -302,6 +302,724 @@ class PowerMonitorApp:
             import os
             os._exit(1)
             
+    def add_rscm(self, rack_name, ip_address, username=None, password=None, auto_monitor=True, poll_rate=60):
+        """Add a new R-SCM to monitor."""
+        try:
+            # Get the monitoring_data from monitor_tab
+            if not hasattr(self, 'monitoring_data'):
+                if hasattr(self, 'monitor_tab') and hasattr(self.monitor_tab, 'rack_tabs'):
+                    self.monitoring_data = self.monitor_tab.rack_tabs
+                else:
+                    self.monitoring_data = {}
+            
+            # Check if rack already exists
+            if rack_name in self.monitoring_data:
+                logger.error(f"Rack {rack_name} already exists")
+                return False
+            
+            # Create new rack entry
+            rack_key = f"{rack_name}_{ip_address}"
+            
+            # Get default credentials from config
+            default_username = self.config.get('default_username', 'admin')
+            default_password = self.config.get('default_password', 'admin')
+            
+            self.monitoring_data[rack_key] = {
+                'address': ip_address,
+                'username': username or default_username,
+                'password': password or default_password,
+                'poll_rate': poll_rate,
+                'data': [],
+                'status': 'Not Monitoring',
+                'last_reading': None
+            }
+            
+            # Start monitoring if auto_monitor is True and monitor_tab exists
+            if auto_monitor and hasattr(self, 'monitor_tab'):
+                self.start_monitoring(rack_name)
+            
+            # Save configuration by delegating to monitor_tab if available
+            self.save_config()
+            
+            logger.info(f"Added new R-SCM: {rack_name} at {ip_address}")
+            return True
+        
+        except Exception as e:
+            logger.error(f"Error adding R-SCM {rack_name}: {str(e)}")
+            return False
+
+    def update_rscm(self, original_rack_name, rack_name, ip_address, username=None, password=None, poll_rate=60):
+        """Update an existing R-SCM configuration via the web interface."""
+        try:
+            # Check if the name is changing and if the new name already exists
+            if original_rack_name != rack_name:
+                existing_rscms = self.config.get('rscms', [])
+                for rscm in existing_rscms:
+                    if rscm.get('name') == rack_name:
+                        logger.error(f"Cannot rename to {rack_name}: A rack with this name already exists")
+                        return False
+        
+            # Find the rack in config
+            found_index = None
+            if 'rscms' in self.config:
+                for i, rscm in enumerate(self.config['rscms']):
+                    if rscm.get('name') == original_rack_name:
+                        found_index = i
+                        break
+        
+            if found_index is None:
+                logger.error(f"Rack {original_rack_name} not found in configuration")
+                return False
+        
+            # Update the RSCM in config
+            self.config['rscms'][found_index]['name'] = rack_name  # Update the rack name
+            self.config['rscms'][found_index]['address'] = ip_address
+            if username:
+                self.config['rscms'][found_index]['username'] = username
+            if password:
+                # Should encrypt password before storing
+                self.config['rscms'][found_index]['password'] = password
+        
+            # Update rscm_list for backward compatibility
+            self.config['rscm_list'] = self.config['rscms']
+        
+            # Save configuration
+            if hasattr(self, 'config_manager'):
+                self.config_manager.save_settings(self.config)
+        
+            # Update in monitor tab if it exists
+            if hasattr(self, 'monitor_tab'):
+                for item_id in self.monitor_tab.rscm_tree.get_children():
+                    item = self.monitor_tab.rscm_tree.item(item_id)
+                    if item['values'][0] == original_rack_name:
+                        # Update both the rack name and address
+                        status = item['values'][2]
+                        self.monitor_tab.rscm_tree.item(item_id, values=(rack_name, ip_address, status))
+                        
+                        # If we have active monitoring or tabs, we'd need to update them
+                        if hasattr(self.monitor_tab, 'rack_tabs'):
+                            old_key = f"{original_rack_name}_{ip_address}"
+                            new_key = f"{rack_name}_{ip_address}"
+                            
+                            # Rename the rack tab if it exists
+                            if old_key in self.monitor_tab.rack_tabs:
+                                self.monitor_tab.rack_tabs[new_key] = self.monitor_tab.rack_tabs[old_key]
+                                del self.monitor_tab.rack_tabs[old_key]
+                                
+                                # Update tab label if displayed in notebook
+                                if self.monitor_tab.rack_tabs[new_key].get('added_to_notebook', False):
+                                    tab = self.monitor_tab.rack_tabs[new_key]['tab']
+                                    tab_index = self.monitor_tab.rack_notebook.index(tab)
+                                    self.monitor_tab.rack_notebook.tab(tab_index, text=f"{rack_name}")
+                        
+                        # Update monitoring tasks if active
+                        if hasattr(self.monitor_tab, 'monitoring_tasks'):
+                            old_key = f"{original_rack_name}_{ip_address}"
+                            new_key = f"{rack_name}_{ip_address}"
+                            
+                            if old_key in self.monitor_tab.monitoring_tasks:
+                                self.monitor_tab.monitoring_tasks[new_key] = self.monitor_tab.monitoring_tasks[old_key]
+                                del self.monitor_tab.monitoring_tasks[old_key]
+                        
+                        break
+        
+            logger.info(f"Updated R-SCM: {original_rack_name} -> {rack_name}")
+            return True
+    
+        except Exception as e:
+            logger.error(f"Error updating R-SCM {original_rack_name}: {str(e)}")
+            return False
+
+    def delete_rscm(self, rack_name):
+        """Delete an R-SCM from monitoring."""
+        try:
+            # Get the monitoring_data if not already available
+            if not hasattr(self, 'monitoring_data'):
+                if hasattr(self, 'monitor_tab') and hasattr(self.monitor_tab, 'rack_tabs'):
+                    self.monitoring_data = self.monitor_tab.rack_tabs
+                else:
+                    logger.error("No monitoring data available")
+                    return False
+            
+            # Find the rack
+            rack_key = None
+            for key in list(self.monitoring_data.keys()):
+                if key.startswith(f"{rack_name}_"):
+                    rack_key = key
+                    break
+            
+            if not rack_key:
+                logger.error(f"Rack {rack_name} not found")
+                return False
+            
+            # Stop monitoring first if active
+            if self.monitoring_data[rack_key].get('status') == 'Monitoring':
+                self.pause_monitoring(rack_name)
+            
+            # Delete the rack
+            del self.monitoring_data[rack_key]
+            
+            # Save configuration
+            self.save_config()
+            
+            logger.info(f"Deleted R-SCM: {rack_name}")
+            return True
+        
+        except Exception as e:
+            logger.error(f"Error deleting R-SCM {rack_name}: {str(e)}")
+            return False
+
+    def start_monitoring(self, rack_name):
+        """Start monitoring for a specific rack."""
+        try:
+            # Get the monitoring_data if not already available
+            if not hasattr(self, 'monitoring_data'):
+                if hasattr(self, 'monitor_tab') and hasattr(self.monitor_tab, 'rack_tabs'):
+                    self.monitoring_data = self.monitor_tab.rack_tabs
+                else:
+                    logger.error("No monitoring data available")
+                    return False
+            
+            # Find the rack
+            rack_key = None
+            for key in self.monitoring_data:
+                if key.startswith(f"{rack_name}_"):
+                    rack_key = key
+                    break
+            
+            if not rack_key:
+                logger.error(f"Rack {rack_name} not found")
+                return False
+            
+            # Start monitoring
+            self.monitoring_data[rack_key]['status'] = 'Monitoring'
+            
+            # Delegate actual monitoring to monitor_tab if available
+            if hasattr(self, 'monitor_tab') and hasattr(self.monitor_tab, 'start_monitoring_rack'):
+                name, address = rack_key.split('_', 1)
+                self.monitor_tab.start_monitoring_rack(name, address)
+            
+            logger.info(f"Started monitoring for {rack_name}")
+            return True
+        
+        except Exception as e:
+            logger.error(f"Error starting monitoring for {rack_name}: {str(e)}")
+            return False
+
+    def pause_monitoring(self, rack_name):
+        """Pause monitoring for a specific rack."""
+        try:
+            # Get the monitoring_data if not already available
+            if not hasattr(self, 'monitoring_data'):
+                if hasattr(self, 'monitor_tab') and hasattr(self.monitor_tab, 'rack_tabs'):
+                    self.monitoring_data = self.monitor_tab.rack_tabs
+                else:
+                    logger.error("No monitoring data available")
+                    return False
+            
+            # Find the rack
+            rack_key = None
+            for key in self.monitoring_data:
+                if key.startswith(f"{rack_name}_"):
+                    rack_key = key
+                    break
+            
+            if not rack_key:
+                logger.error(f"Rack {rack_name} not found")
+                return False
+            
+            # Pause monitoring
+            self.monitoring_data[rack_key]['status'] = 'Paused'
+            
+            # Delegate to monitor_tab if available
+            if hasattr(self, 'monitor_tab') and hasattr(self.monitor_tab, 'pause_monitoring_rack'):
+                self.monitor_tab.pause_monitoring_rack(rack_key)
+            
+            logger.info(f"Paused monitoring for {rack_name}")
+            return True
+        
+        except Exception as e:
+            logger.error(f"Error pausing monitoring for {rack_name}: {str(e)}")
+            return False
+
+    def get_rscm_info(self, rack_name):
+        """Get information about a specific R-SCM."""
+        try:
+            # Get the monitoring_data if not already available
+            if not hasattr(self, 'monitoring_data'):
+                if hasattr(self, 'monitor_tab') and hasattr(self.monitor_tab, 'rack_tabs'):
+                    self.monitoring_data = self.monitor_tab.rack_tabs
+                else:
+                    logger.error("No monitoring data available")
+                    return None
+            
+            # Find the rack
+            rack_key = None
+            for key in self.monitoring_data:
+                if key.startswith(f"{rack_name}_"):
+                    rack_key = key
+                    break
+            
+            if not rack_key:
+                logger.error(f"Rack {rack_name} not found")
+                return None
+            
+            # Get rack info
+            info = self.monitoring_data[rack_key].copy()
+            info['name'] = rack_name
+            
+            # Remove sensitive or large data
+            if 'password' in info:
+                del info['password']
+            if 'data' in info:
+                del info['data']
+                
+            return info
+            
+        except Exception as e:
+            logger.error(f"Error getting info for {rack_name}: {str(e)}")
+            return None
+
+    def get_all_racks(self):
+        """Get a list of all racks for the management interface."""
+        all_racks = []
+        
+        logger.info("============ DEBUG: get_all_racks called ============")
+
+        try:
+            # Use the config as the source of truth for which racks exist
+            if 'rscms' in self.config:
+                for rscm in self.config['rscms']:
+                    rack_name = rscm.get('name')
+                    address = rscm.get('address')
+                    
+                    if rack_name and address:
+                        rack_key = f"{rack_name}_{address}"
+                        logger.info(f"DEBUG: Processing rack: {rack_name} with key {rack_key}")
+                        
+                        # Default values
+                        status = 'Not Monitoring'
+                        is_monitoring = False
+                        
+                        # Get status directly from the tree view - this is our source of truth
+                        tree_status_found = False
+                        if hasattr(self, 'monitor_tab'):
+                            for item_id in self.monitor_tab.rscm_tree.get_children():
+                                item = self.monitor_tab.rscm_tree.item(item_id)
+                                if item['values'][0] == rack_name:
+                                    status = item['values'][2]
+                                    logger.info(f"DEBUG: Tree status for {rack_name} is: {status}")
+                                    
+                                    # IMPORTANT: Only set is_monitoring to True if status is EXACTLY "Monitoring"
+                                    # This ensures "Complete" is correctly reported as not monitoring
+                                    is_monitoring = (status == "Monitoring")
+                                    logger.info(f"DEBUG: is_monitoring set to {is_monitoring} based on exact status match")
+                                    tree_status_found = True
+                                    break
+                                    
+                            if not tree_status_found:
+                                logger.info(f"DEBUG: No tree status found for {rack_name}")
+                        
+                        rack_info = {
+                            'name': rack_name,
+                            'address': address,
+                            'status': status,
+                            'is_monitoring': is_monitoring,
+                            'last_reading': None
+                        }
+                        
+                        # Get last reading if available
+                        if hasattr(self, 'monitor_tab') and hasattr(self.monitor_tab, 'rack_tabs'):
+                            if rack_key in self.monitor_tab.rack_tabs:
+                                tab_data = self.monitor_tab.rack_tabs[rack_key]
+                                if 'data' in tab_data and tab_data['data']:
+                                    try:
+                                        last_power = tab_data['data'][-1][1]
+                                        rack_info['last_reading'] = f"{last_power:.2f} W"
+                                    except Exception as e:
+                                        logger.debug(f"Error getting last reading: {e}")
+                        
+                        logger.info(f"DEBUG: Final rack info: {rack_info}")
+                        all_racks.append(rack_info)
+        
+        except Exception as e:
+            logger.error(f"Error getting all racks: {str(e)}")
+
+        return all_racks
+
+    def save_config(self):
+        """Save configuration to persist changes."""
+        try:
+            # First, save rack configuration if MonitorTab is available
+            if hasattr(self, 'monitor_tab') and hasattr(self.monitor_tab, 'save_rack_config'):
+                self.monitor_tab.save_rack_config()
+            
+            # Then save general application settings
+            if hasattr(self, 'config_manager'):
+                self.config_manager.save_settings(self.config)
+                
+            return True
+        except Exception as e:
+            logger.error(f"Error saving configuration: {str(e)}")
+            return False
+    
+    def add_rscm(self, rack_name, ip_address, username=None, password=None, auto_monitor=True, poll_rate=60):
+        """Add a new R-SCM to monitor via the web interface."""
+        try:
+            # Check if rack already exists in config
+            existing_rscms = self.config.get('rscms', [])
+            for rscm in existing_rscms:
+                if rscm.get('name') == rack_name:
+                    logger.error(f"Rack {rack_name} already exists")
+                    return False
+        
+            # Add to config
+            new_rscm = {
+                'name': rack_name,
+                'address': ip_address
+            }
+        
+            # Store username/password if provided
+            if username:
+                new_rscm['username'] = username
+            if password:
+                # Should encrypt password before storing
+                new_rscm['password'] = password
+        
+            # Add poll rate if provided and different from default
+            if poll_rate != 60:
+                new_rscm['poll_rate'] = poll_rate
+        
+            # Add to rscms list
+            if 'rscms' not in self.config:
+                self.config['rscms'] = []
+            self.config['rscms'].append(new_rscm)
+        
+            # Also update rscm_list for backward compatibility
+            self.config['rscm_list'] = self.config['rscms']
+        
+            # Save configuration
+            if hasattr(self, 'config_manager'):
+                self.config_manager.save_settings(self.config)
+        
+            # Add to monitor tab if it exists
+            if hasattr(self, 'monitor_tab'):
+                # Add to the tree view
+                self.monitor_tab.rscm_tree.insert('', 'end', values=(rack_name, ip_address, "Not Started"))
+            
+                # Create a tab for it (without showing)
+                self.monitor_tab._create_rack_tab_without_showing(rack_name, ip_address)
+            
+                # NOTE: We're removing the automatic monitoring start to avoid UI prompts
+                # Uncomment this block if you want monitoring to start automatically after fixing the UI prompt issue
+                '''
+                # Start monitoring if requested
+                if auto_monitor:
+                    # Find the item in the tree
+                    for item_id in self.monitor_tab.rscm_tree.get_children():
+                        item = self.monitor_tab.rscm_tree.item(item_id)
+                        if item['values'][0] == rack_name:
+                            # Select this item
+                            self.monitor_tab.rscm_tree.selection_set(item_id)
+                            # Start monitoring
+                            self.monitor_tab._start_selected_monitoring()
+                            break
+                '''
+        
+            logger.info(f"Added new R-SCM: {rack_name} at {ip_address}")
+            return True
+    
+        except Exception as e:
+            logger.error(f"Error adding R-SCM {rack_name}: {str(e)}")
+            return False
+
+    def update_rscm(self, original_rack_name, rack_name, ip_address, username=None, password=None, poll_rate=60):
+        """Update an existing R-SCM configuration via the web interface."""
+        try:
+            # Check if the name is changing and if the new name already exists
+            if original_rack_name != rack_name:
+                existing_rscms = self.config.get('rscms', [])
+                for rscm in existing_rscms:
+                    if rscm.get('name') == rack_name:
+                        logger.error(f"Cannot rename to {rack_name}: A rack with this name already exists")
+                        return False
+        
+            # Find the rack in config
+            found_index = None
+            if 'rscms' in self.config:
+                for i, rscm in enumerate(self.config['rscms']):
+                    if rscm.get('name') == original_rack_name:
+                        found_index = i
+                        break
+        
+            if found_index is None:
+                logger.error(f"Rack {original_rack_name} not found in configuration")
+                return False
+        
+            # Update the RSCM in config
+            self.config['rscms'][found_index]['name'] = rack_name  # Update the rack name
+            self.config['rscms'][found_index]['address'] = ip_address
+            if username:
+                self.config['rscms'][found_index]['username'] = username
+            if password:
+                # Should encrypt password before storing
+                self.config['rscms'][found_index]['password'] = password
+        
+            # Update rscm_list for backward compatibility
+            self.config['rscm_list'] = self.config['rscms']
+        
+            # Save configuration
+            if hasattr(self, 'config_manager'):
+                self.config_manager.save_settings(self.config)
+        
+            # Update in monitor tab if it exists
+            if hasattr(self, 'monitor_tab'):
+                for item_id in self.monitor_tab.rscm_tree.get_children():
+                    item = self.monitor_tab.rscm_tree.item(item_id)
+                    if item['values'][0] == original_rack_name:
+                        # Update both the rack name and address
+                        status = item['values'][2]
+                        self.monitor_tab.rscm_tree.item(item_id, values=(rack_name, ip_address, status))
+                        
+                        # If we have active monitoring or tabs, we'd need to update them
+                        if hasattr(self.monitor_tab, 'rack_tabs'):
+                            old_key = f"{original_rack_name}_{ip_address}"
+                            new_key = f"{rack_name}_{ip_address}"
+                            
+                            # Rename the rack tab if it exists
+                            if old_key in self.monitor_tab.rack_tabs:
+                                self.monitor_tab.rack_tabs[new_key] = self.monitor_tab.rack_tabs[old_key]
+                                del self.monitor_tab.rack_tabs[old_key]
+                                
+                                # Update tab label if displayed in notebook
+                                if self.monitor_tab.rack_tabs[new_key].get('added_to_notebook', False):
+                                    tab = self.monitor_tab.rack_tabs[new_key]['tab']
+                                    tab_index = self.monitor_tab.rack_notebook.index(tab)
+                                    self.monitor_tab.rack_notebook.tab(tab_index, text=f"{rack_name}")
+                        
+                        # Update monitoring tasks if active
+                        if hasattr(self.monitor_tab, 'monitoring_tasks'):
+                            old_key = f"{original_rack_name}_{ip_address}"
+                            new_key = f"{rack_name}_{ip_address}"
+                            
+                            if old_key in self.monitor_tab.monitoring_tasks:
+                                self.monitor_tab.monitoring_tasks[new_key] = self.monitor_tab.monitoring_tasks[old_key]
+                                del self.monitor_tab.monitoring_tasks[old_key]
+                        
+                        break
+        
+            logger.info(f"Updated R-SCM: {original_rack_name} -> {rack_name}")
+            return True
+    
+        except Exception as e:
+            logger.error(f"Error updating R-SCM {original_rack_name}: {str(e)}")
+            return False
+
+    def delete_rscm(self, rack_name):
+        """Delete an R-SCM from configuration via the web interface."""
+        try:
+            # Check if the rack is being monitored
+            if hasattr(self, 'monitor_tab'):
+                for item_id in self.monitor_tab.rscm_tree.get_children():
+                    item = self.monitor_tab.rscm_tree.item(item_id)
+                    if item['values'][0] == rack_name:
+                        address = item['values'][1]
+                        rack_key = f"{rack_name}_{address}"
+                        
+                        if rack_key in self.monitor_tab.monitoring_tasks:
+                            logger.error(f"Cannot delete {rack_name} while it is being monitored")
+                            return False
+                        
+                        # Remove from tree and tabs if not monitoring
+                        self.monitor_tab.rscm_tree.delete(item_id)
+                        
+                        if rack_key in self.monitor_tab.rack_tabs:
+                            if self.monitor_tab.rack_tabs[rack_key].get('added_to_notebook', False):
+                                try:
+                                    tab_idx = self.monitor_tab.rack_notebook.index(self.monitor_tab.rack_tabs[rack_key]['tab'])
+                                    self.monitor_tab.rack_notebook.forget(tab_idx)
+                                except Exception as tab_e:
+                                    logger.warning(f"Could not remove tab for {rack_name}: {str(tab_e)}")
+                            
+                            del self.monitor_tab.rack_tabs[rack_key]
+                        
+                        break
+            
+            # Remove from config
+            if 'rscms' in self.config:
+                self.config['rscms'] = [rscm for rscm in self.config['rscms'] if rscm.get('name') != rack_name]
+                # Update rscm_list for backward compatibility
+                self.config['rscm_list'] = self.config['rscms']
+                
+                # Save configuration
+                if hasattr(self, 'config_manager'):
+                    self.config_manager.save_settings(self.config)
+        
+            logger.info(f"Deleted R-SCM: {rack_name}")
+            return True
+    
+        except Exception as e:
+            logger.error(f"Error deleting R-SCM {rack_name}: {str(e)}")
+            return False
+
+    def start_monitoring(self, rack_name):
+        """Start monitoring for a specific rack via the web interface."""
+        try:
+            if hasattr(self, 'monitor_tab'):
+                # Find the rack in the tree
+                found = False
+                for item_id in self.monitor_tab.rscm_tree.get_children():
+                    item = self.monitor_tab.rscm_tree.item(item_id)
+                    if item['values'][0] == rack_name:
+                        address = item['values'][1]
+                        status = item['values'][2]
+                        
+                        # Check if already monitoring
+                        if status == "Monitoring":
+                            logger.info(f"{rack_name} is already being monitored")
+                            return True
+                        
+                        # Select this item in the tree
+                        self.monitor_tab.rscm_tree.selection_set(item_id)
+                        
+                        # Use the existing monitoring start method with default parameters
+                        # Get default interval from config or use 1.0
+                        interval = self.config.get('monitoring', {}).get('default_interval_minutes', 1.0)
+                        # Start monitoring (duration None means continuous)
+                        self.monitor_tab._monitor_single_rack_isolated(rack_name, address, interval, None)
+                        
+                        found = True
+                        break
+                
+                if not found:
+                    logger.error(f"Rack {rack_name} not found in tree")
+                    return False
+                
+                return True
+            else:
+                logger.error("Monitor tab not available")
+                return False
+        
+        except Exception as e:
+            logger.error(f"Error starting monitoring for {rack_name}: {str(e)}")
+            return False
+
+    def pause_monitoring(self, rack_name):
+        """Pause monitoring for a specific rack via the web interface."""
+        try:
+            if hasattr(self, 'monitor_tab'):
+                # Find the rack in the tree
+                found = False
+                for item_id in self.monitor_tab.rscm_tree.get_children():
+                    item = self.monitor_tab.rscm_tree.item(item_id)
+                    if item['values'][0] == rack_name:
+                        address = item['values'][1]
+                        
+                        # Stop monitoring for this rack
+                        self.monitor_tab._stop_rack_monitoring(rack_name, address)
+                        found = True
+                        break
+                
+                if not found:
+                    logger.error(f"Rack {rack_name} not found in tree")
+                    return False
+                
+                return True
+            else:
+                logger.error("Monitor tab not available")
+                return False
+        
+        except Exception as e:
+            logger.error(f"Error pausing monitoring for {rack_name}: {str(e)}")
+            return False
+
+    def get_rscm_info(self, rack_name):
+        """Get information about a specific R-SCM for the web interface."""
+        try:
+            logger.debug(f"Looking for RSCM with name: {rack_name}")
+        
+            # Find rack in config
+            if 'rscms' in self.config:
+                for rscm in self.config['rscms']:
+                    if rscm.get('name') == rack_name:
+                        # Create a copy to avoid modifying original
+                        info = rscm.copy()
+                        logger.debug(f"Found RSCM: {info}")
+                        
+                        # Set default values for fields not in config
+                        info['status'] = 'Not Monitoring'
+                        info['is_monitoring'] = False
+                        
+                        # Get status from tree if monitor_tab is available
+                        if hasattr(self, 'monitor_tab'):
+                            for item_id in self.monitor_tab.rscm_tree.get_children():
+                                item = self.monitor_tab.rscm_tree.item(item_id)
+                                if item['values'][0] == rack_name:
+                                    status = item['values'][2]
+                                    info['status'] = status
+                                    info['is_monitoring'] = (status == "Monitoring")
+                                    break
+                    
+                        return info
+        
+            logger.warning(f"RSCM not found: {rack_name}")
+            return None
+    
+        except Exception as e:
+            logger.error(f"Error getting info for {rack_name}: {str(e)}")
+            return None
+
+    def get_all_racks(self):
+        """Get a list of all racks for the management interface."""
+        all_racks = []
+
+        try:
+            # Use the config as the source of truth for which racks exist
+            if 'rscms' in self.config:
+                for rscm in self.config['rscms']:
+                    rack_name = rscm.get('name')
+                    address = rscm.get('address')
+                    
+                    if rack_name and address:
+                        rack_info = {
+                            'name': rack_name,
+                            'address': address,
+                            'status': 'Not Monitoring',
+                            'is_monitoring': False,
+                            'last_reading': None
+                        }
+                        
+                        # Get status from tree if monitor_tab is available
+                        if hasattr(self, 'monitor_tab'):
+                            # First check monitoring_tasks for active monitoring
+                            rack_key = f"{rack_name}_{address}"
+                            if hasattr(self.monitor_tab, 'monitoring_tasks') and rack_key in self.monitor_tab.monitoring_tasks:
+                                rack_info['status'] = 'Monitoring'
+                                rack_info['is_monitoring'] = True
+                            else:
+                                # Check the tree view for visual status
+                                for item_id in self.monitor_tab.rscm_tree.get_children():
+                                    item = self.monitor_tab.rscm_tree.item(item_id)
+                                    if item['values'][0] == rack_name:
+                                        status = item['values'][2]
+                                        rack_info['status'] = status
+                                        # Only mark as monitoring if the status explicitly says so
+                                        # This ensures "Complete" status is properly reflected
+                                        rack_info['is_monitoring'] = (status == "Monitoring")
+                                        break
+                        
+                        # Get last reading if available
+                        if rack_key in self.monitor_tab.rack_tabs:
+                            tab_data = self.monitor_tab.rack_tabs[rack_key]
+                            if 'data' in tab_data and tab_data['data']:
+                                last_power = tab_data['data'][-1][1]
+                                rack_info['last_reading'] = f"{last_power:.2f} W"
+                        
+                        all_racks.append(rack_info)
+        except Exception as e:
+            logger.error(f"Error getting all racks: {str(e)}")
+
+        return all_racks
 def main():
     try:
         root = tk.Tk()
