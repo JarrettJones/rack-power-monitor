@@ -4,6 +4,7 @@
     <title>Rack Power Monitor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         // Handle refresh timer
         let refreshTimer;
@@ -21,7 +22,16 @@
             // If rate is valid and not zero, set new timer
             if (rate > 0) {
                 refreshTimer = setTimeout(function() {
-                    location.reload();
+                    // Check which tab is currently active
+                    const activeTab = localStorage.getItem("activeTab");
+                    
+                    // Only refresh if we're not on the Saved Data tab
+                    if (activeTab !== "SavedDataTab") {
+                        location.reload();
+                    } else {
+                        // If on Saved Data tab, just restart the timer without refreshing
+                        setRefreshRate(rate);
+                    }
                 }, rate * 1000);
                 
                 // Save setting to localStorage
@@ -115,6 +125,9 @@
                     </button>
                     <button class="tablinks" data-tab="StandbyTab" onclick="openTab(event, 'StandbyTab')">
                         Standby ({{ standby_count }})
+                    </button>
+                    <button class="tablinks" data-tab="SavedDataTab" onclick="openTab(event, 'SavedDataTab')">
+                        Saved Data
                     </button>
                     <button class="tablinks" data-tab="ManageTab" onclick="openTab(event, 'ManageTab')">
                         Manage R-SCMs
@@ -222,6 +235,107 @@
                                 <p>No standby racks found.</p>
                             </div>
                         {% endif %}
+                    </div>
+                </div>
+                
+                <!-- For Saved Data Tab (newly added) -->
+                <div id="SavedDataTab" class="tabcontent">
+                    <div class="saved-data-container">
+                        <h2>Saved Monitoring Data</h2>
+                        
+                        <!-- Add RSCM filter dropdown -->
+                        <div class="rscm-filter">
+                            <label for="rscm-selector">Filter by RSCM:</label>
+                            <select id="rscm-selector" onchange="filterRackSections(this.value)">
+                                <option value="all">Show All RSCMs</option>
+                                {% if saved_racks %}
+                                    {% for rack in saved_racks %}
+                                        <option value="{{ rack.name }}">{{ rack.name }}</option>
+                                    {% endfor %}
+                                {% endif %}
+                            </select>
+                        </div>
+                        
+                        <!-- Data viewer panel -->
+                        <div id="data-viewer" class="data-viewer">
+                            <h3 id="viewer-title">Data Viewer</h3>
+                            
+                            <div class="stats-container">
+                                <div class="stat-card">
+                                    <div>Min Power</div>
+                                    <div id="stat-min" class="stat-value">-</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div>Max Power</div>
+                                    <div id="stat-max" class="stat-value">-</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div>Avg Power</div>
+                                    <div id="stat-avg" class="stat-value">-</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div>Mode</div>
+                                    <div id="stat-mode" class="stat-value">-</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div>Readings</div>
+                                    <div id="stat-count" class="stat-value">-</div>
+                                </div>
+                            </div>
+                            
+                            <div class="chart-container">
+                                <canvas id="power-chart"></canvas>
+                            </div>
+                            
+                            <div class="export-options">
+                                <button id="export-csv" class="action-btn">Export CSV</button>
+                                <button id="export-png" class="action-btn">Export Chart Image</button>
+                                <button id="hide-viewer" class="action-btn" style="background-color:#666">Close Viewer</button>
+                            </div>
+                        </div>
+                        
+                        <!-- Pagination controls -->
+                        <div class="pagination-controls">
+                            <button id="prev-page" class="pagination-button" disabled>
+                                &larr; Previous
+                            </button>
+                            <div class="pagination-info">
+                                Page <span id="current-page">1</span> of <span id="total-pages">1</span>
+                            </div>
+                            <button id="next-page" class="pagination-button">
+                                Next &rarr;
+                            </button>
+                        </div>
+                        
+                        <!-- Container for paginated rack sections -->
+                        <div id="rack-sections-container">
+                            {% if saved_racks %}
+                                {% for rack in saved_racks %}
+                                    <div class="rack-section" data-page="1">
+                                        <!-- Existing rack section content -->
+                                        <h3>{{ rack.name }}</h3>
+                                        
+                                        {% if rack.csv_files %}
+                                            <div class="files-grid">
+                                                {% for file in rack.csv_files %}
+                                                    <div class="file-card" onclick="loadFile('{{ file.name }}')">
+                                                        <h4>{{ file.name }}</h4>
+                                                        <div class="file-info">
+                                                            <div>Size: {{ (file.size / 1024) | round(1) }} KB</div>
+                                                            <div>Modified: {{ file.modified | timestamp }}</div>
+                                                        </div>
+                                                    </div>
+                                                {% endfor %}
+                                            </div>
+                                        {% else %}
+                                            <p>No CSV files found for this rack.</p>
+                                        {% endif %}
+                                    </div>
+                                {% endfor %}
+                            {% else %}
+                                <p class="no-data">No saved data files found. Start monitoring racks to generate data.</p>
+                            {% endif %}
+                        </div>
                     </div>
                 </div>
                 
@@ -509,6 +623,254 @@
                 modal.style.display = 'none';
             }
         };
+        
+        // Variables for the saved data viewer
+        let powerChart = null;
+        let currentData = null;
+        
+        // Function to load a file
+        function loadFile(filename) {
+            fetch(`/api/saved-data/${encodeURIComponent(filename)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Store the data for export
+                        currentData = data;
+                        
+                        // Show the data viewer
+                        document.getElementById('data-viewer').style.display = 'block';
+                        document.getElementById('viewer-title').textContent = `Data Viewer: ${filename}`;
+                        
+                        // Scroll to the viewer
+                        document.getElementById('data-viewer').scrollIntoView({ behavior: 'smooth' });
+                        
+                        // Update the stats
+                        document.getElementById('stat-min').textContent = `${data.stats.min.toFixed(2)} W`;
+                        document.getElementById('stat-max').textContent = `${data.stats.max.toFixed(2)} W`;
+                        document.getElementById('stat-avg').textContent = `${data.stats.avg.toFixed(2)} W`;
+                        document.getElementById('stat-mode').textContent = `${data.stats.mode.toFixed(2)} W`;
+                        document.getElementById('stat-count').textContent = data.stats.count;
+                        
+                        // Create or update the chart
+                        createChart(data.timestamps, data.power);
+                    } else {
+                        alert(`Error loading file: ${data.error}`);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error loading file. See console for details.');
+                });
+        }
+        
+        // Function to create or update the chart
+        function createChart(timestamps, powerValues) {
+            const ctx = document.getElementById('power-chart').getContext('2d');
+            
+            // Destroy existing chart if it exists
+            if (powerChart) {
+                powerChart.destroy();
+            }
+            
+            // Create new chart
+            powerChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: timestamps,
+                    datasets: [{
+                        label: 'Power (W)',
+                        data: powerValues,
+                        borderColor: 'rgb(33, 150, 243)',
+                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Power (W)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Export functions
+        document.getElementById('export-csv').addEventListener('click', function() {
+            if (!currentData) return;
+            
+            // Create CSV content
+            let csvContent = "data:text/csv;charset=utf-8,Timestamp,Power(W)\n";
+            
+            for (let i = 0; i < currentData.timestamps.length; i++) {
+                csvContent += `${currentData.timestamps[i]},${currentData.power[i]}\n`;
+            }
+            
+            // Create download link
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `export_${currentData.filename}`);
+            document.body.appendChild(link);
+            
+            // Trigger download
+            link.click();
+            document.body.removeChild(link);
+        });
+        
+        document.getElementById('export-png').addEventListener('click', function() {
+            if (!powerChart) return;
+            
+            // Get the canvas as an image
+            const canvas = document.getElementById('power-chart');
+            const image = canvas.toDataURL("image/png");
+            
+            // Create download link
+            const link = document.createElement("a");
+            link.setAttribute("href", image);
+            link.setAttribute("download", `chart_${currentData.filename.replace('.csv', '.png')}`);
+            document.body.appendChild(link);
+            
+            // Trigger download
+            link.click();
+            document.body.removeChild(link);
+        });
+        
+        document.getElementById('hide-viewer').addEventListener('click', function() {
+            document.getElementById('data-viewer').style.display = 'none';
+        });
+        
+        // Pagination for Saved Data tab
+        document.addEventListener('DOMContentLoaded', function() {
+            let currentPage = 1;
+            const itemsPerPage = 3; // Show 3 rack sections per page
+            
+            // Initialize pagination (now globally accessible)
+            initPagination = function() {
+                let initPagination;
+                const rackSections = document.querySelectorAll('#rack-sections-container .rack-section');
+                if (rackSections.length === 0) return;
+                
+                // Make all rack sections visible before pagination
+                rackSections.forEach(section => {
+                    section.style.removeProperty('display');
+                });
+                
+                // Calculate total pages
+                const totalPages = Math.ceil(rackSections.length / itemsPerPage);
+                document.getElementById('total-pages').textContent = totalPages;
+                
+                // Assign pages to rack sections
+                rackSections.forEach((section, index) => {
+                    const page = Math.floor(index / itemsPerPage) + 1;
+                    section.setAttribute('data-page', page);
+                });
+                
+                // Reset the selected filter
+                document.getElementById('rscm-selector').value = 'all';
+                
+                // Show only the first page initially
+                showPage(1);
+                
+                // Enable/disable pagination buttons
+                updatePaginationButtons(1, totalPages);
+            };
+
+            
+            // Show a specific page
+            function showPage(pageNum) {
+                const rackSections = document.querySelectorAll('#rack-sections-container .rack-section');
+                
+                rackSections.forEach(section => {
+                    if (section.getAttribute('data-page') == pageNum) {
+                        section.style.display = 'block';
+                    } else {
+                        section.style.display = 'none';
+                    }
+                });
+                
+                // Update current page indicator
+                document.getElementById('current-page').textContent = pageNum;
+                currentPage = pageNum;
+            }
+            
+            // Update pagination button states
+            function updatePaginationButtons(current, total) {
+                const prevButton = document.getElementById('prev-page');
+                const nextButton = document.getElementById('next-page');
+                
+                prevButton.disabled = current <= 1;
+                nextButton.disabled = current >= total;
+            }
+            
+            // Previous page button
+            document.getElementById('prev-page').addEventListener('click', function() {
+                if (currentPage > 1) {
+                    showPage(currentPage - 1);
+                    updatePaginationButtons(currentPage, parseInt(document.getElementById('total-pages').textContent));
+                }
+            });
+            
+            // Next page button
+            document.getElementById('next-page').addEventListener('click', function() {
+                const totalPages = parseInt(document.getElementById('total-pages').textContent);
+                if (currentPage < totalPages) {
+                    showPage(currentPage + 1);
+                    updatePaginationButtons(currentPage, totalPages);
+                }
+            });
+            
+            // Initialize pagination when the saved data tab becomes visible
+            const savedDataTabButton = document.querySelector('.tablinks[data-tab="SavedDataTab"]');
+            if (savedDataTabButton) {
+                savedDataTabButton.addEventListener('click', function() {
+                    // Wait a moment for the tab to become visible
+                    setTimeout(initPagination, 50);
+                });
+            }
+            
+            // Also initialize pagination if the saved data tab is the active tab on load
+            if (localStorage.getItem('activeTab') === 'SavedDataTab') {
+                setTimeout(initPagination, 100);
+            }
+        });
+        
+    function filterRackSections(rackName) {
+        const rackSections = document.querySelectorAll('#rack-sections-container .rack-section');
+        const paginationControls = document.querySelector('.pagination-controls');
+        
+        // If showing all, restore pagination and show first page
+        if (rackName === 'all') {
+            paginationControls.style.display = 'flex';
+            initPagination(); // Re-initialize pagination
+            return;
+        }
+        
+        // Hide pagination when filtering by a specific RSCM
+        paginationControls.style.display = 'none';
+        
+        // Show only the selected RSCM's section
+        rackSections.forEach(section => {
+            const sectionTitle = section.querySelector('h3').textContent;
+            if (sectionTitle === rackName) {
+                section.style.display = 'block';
+            } else {
+                section.style.display = 'none';
+            }
+        });
+    }
     </script>
 </body>
 </html>

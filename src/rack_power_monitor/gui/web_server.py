@@ -33,7 +33,7 @@ class WebMonitorServer:
         @self.flask_app.route('/')
         def index():
             """Main index page that shows all racks."""
-            # FIXED: Use get_all_racks() to get consistent status information
+            # Get rack information as you currently do
             all_racks = []
             if hasattr(self.app, 'get_all_racks'):
                 all_racks = self.app.get_all_racks()
@@ -92,6 +92,55 @@ class WebMonitorServer:
             active_racks.sort(key=lambda x: x['name'])
             standby_racks.sort(key=lambda x: x['name'])
             
+            # Get saved data files for the Saved Data tab
+            saved_racks = []
+            
+            try:
+                import os
+                power_data_dir = os.path.join(os.getcwd(), 'power_data')
+                
+                if os.path.isdir(power_data_dir):
+                    # Get all CSV files
+                    csv_files = []
+                    for filename in os.listdir(power_data_dir):
+                        filepath = os.path.join(power_data_dir, filename)
+                        if os.path.isfile(filepath) and filename.endswith('.csv'):
+                            # Try to extract rack name from filename
+                            rack_name = 'Unknown'
+                            parts = filename.split('_')
+                            if len(parts) > 0:
+                                rack_name = parts[0]
+                                
+                            csv_files.append({
+                                'name': filename,
+                                'path': filepath,
+                                'size': os.path.getsize(filepath),
+                                'modified': os.path.getmtime(filepath),
+                                'rack_name': rack_name
+                            })
+                
+                # Group files by rack name
+                racks_dict = {}
+                for file_info in csv_files:
+                    rack_name = file_info['rack_name']
+                    if rack_name not in racks_dict:
+                        racks_dict[rack_name] = {
+                            'name': rack_name,
+                            'csv_files': []
+                        }
+                    racks_dict[rack_name]['csv_files'].append(file_info)
+                
+                # Sort files by modification time (newest first)
+                for rack_name, rack_info in racks_dict.items():
+                    rack_info['csv_files'].sort(key=lambda x: x['modified'], reverse=True)
+                
+                # Convert to list and sort by rack name
+                saved_racks = list(racks_dict.values())
+                saved_racks.sort(key=lambda x: x['name'])
+            except Exception as e:
+                import logging
+                logging.error(f"Error getting saved data files: {str(e)}")
+            
             # Get counts for the tab headers
             active_count = len(active_racks)
             standby_count = len(standby_racks)
@@ -101,6 +150,7 @@ class WebMonitorServer:
                                   active_racks=active_racks,
                                   standby_racks=standby_racks,
                                   all_racks=all_racks,
+                                  saved_racks=saved_racks,
                                   active_count=active_count,
                                   standby_count=standby_count)
             
@@ -733,6 +783,96 @@ class WebMonitorServer:
                     'success': False,
                     'message': f'Error retrieving debug info: {str(e)}'
                 })
+        
+        @self.flask_app.template_filter('timestamp')
+        def format_timestamp(timestamp):
+            """Format a timestamp for display."""
+            from datetime import datetime
+            dt = datetime.fromtimestamp(timestamp)
+            return dt.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Add new API route to get data from saved CSV files
+        @self.flask_app.route('/api/saved-data/<filename>')
+        def get_saved_data(filename):
+            """Get CSV data for a specific file."""
+            try:
+                import os
+                import csv
+                from datetime import datetime
+                
+                # Determine the power_data directory path
+                power_data_dir = os.path.join(os.getcwd(), 'power_data')
+                if not os.path.isdir(power_data_dir):
+                    power_data_dir = os.path.join(os.path.dirname(os.getcwd()), 'power_data')
+                    if not os.path.isdir(power_data_dir):
+                        return jsonify({'success': False, 'error': 'Power data directory not found'})
+                
+                # Ensure the filename is safe and points to a CSV file
+                if not filename.endswith('.csv') or '..' in filename:
+                    return jsonify({'success': False, 'error': 'Invalid filename'})
+                
+                filepath = os.path.join(power_data_dir, filename)
+                if not os.path.isfile(filepath):
+                    return jsonify({'success': False, 'error': 'File not found'})
+                
+                # Read the CSV file
+                timestamps = []
+                power_values = []
+                
+                with open(filepath, 'r', newline='') as csvfile:
+                    reader = csv.reader(csvfile)
+                    # Skip header if it exists
+                    try:
+                        header = next(reader)
+                    except StopIteration:
+                        return jsonify({'success': False, 'error': 'Empty file'})
+                        
+                    for row in reader:
+                        try:
+                            if len(row) >= 2:
+                                # Try to parse timestamp
+                                timestamp_str = row[0]
+                                # Parse power value
+                                power = float(row[1])
+                                
+                                timestamps.append(timestamp_str)
+                                power_values.append(power)
+                        except Exception as e:
+                            continue
+                
+                # Calculate statistics
+                if power_values:
+                    min_power = min(power_values)
+                    max_power = max(power_values)
+                    avg_power = sum(power_values) / len(power_values)
+                    
+                    # Find mode (most common value, rounded to 2 decimals)
+                    from collections import Counter
+                    rounded_values = [round(p, 2) for p in power_values]
+                    most_common = Counter(rounded_values).most_common(1)
+                    mode = most_common[0][0] if most_common else None
+                else:
+                    min_power = max_power = avg_power = mode = 0
+                
+                return jsonify({
+                    'success': True,
+                    'filename': filename,
+                    'timestamps': timestamps,
+                    'power': power_values,
+                    'stats': {
+                        'min': min_power,
+                        'max': max_power,
+                        'avg': avg_power,
+                        'mode': mode,
+                        'count': len(power_values)
+                    }
+                })
+            
+            except Exception as e:
+                import traceback, logging
+                logging.error(f"Error in get_saved_data: {str(e)}")
+                logging.error(traceback.format_exc())
+                return jsonify({'success': False, 'error': str(e)})
         
     def start(self):
         """Start the web server in a separate thread."""
