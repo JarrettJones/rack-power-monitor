@@ -43,6 +43,9 @@ class RackPowerMonitor:
         logger = logging.getLogger("power_monitor")
         logger.info(f"Starting monitor_all_racks with interval={interval_minutes}min, duration={duration_hours}hrs")
         
+        # Create a new session ID for this monitoring run to ensure new CSV files
+        self.reset_session()
+        
         # Add a paused attribute if it doesn't exist
         if not hasattr(self, 'paused'):
             self.paused = False
@@ -334,16 +337,24 @@ class RackPowerMonitor:
         self.monitoring_active = False
 
     def _save_to_csv(self, rack_name, timestamp, power):
-        """Save power reading to CSV file."""
-        # Get the rack address from the racks dictionary
-        rack_address = self.racks[rack_name]["address"]
+        """Save power reading to CSV file with unique session-based naming."""
+        # Create the filename using rack name, date and session start time
+        # This ensures each monitoring session gets its own file
         
-        # Clean up the address for filename (replace dots with underscores)
-        safe_address = rack_address.replace('.', '_')
+        # If we don't have a session_id yet, create one based on start time
+        if not hasattr(self, 'session_id'):
+            self.session_id = timestamp.strftime("%Y%m%d_%H%M%S")
         
-        # Create the filename using rack name, address, and date
-        current_date = timestamp.strftime("%Y%m%d")
-        filename = f"{rack_name}_{safe_address}_{current_date}.csv"
+        # Create a unique filename for this monitoring session
+        filename = f"{rack_name}_{self.session_id}.csv"
+        
+        # Create power_data directory if it doesn't exist
+        if not hasattr(self, 'data_dir') or self.data_dir is None:
+            self.data_dir = "power_data"
+            
+        if not os.path.exists(self.data_dir):
+            os.makedirs(self.data_dir, exist_ok=True)
+        
         filepath = os.path.join(self.data_dir, filename)
         
         # Check if file exists
@@ -362,5 +373,17 @@ class RackPowerMonitor:
             
             # Write data
             writer.writerow([formatted_time, power])
-            
+                
         logger.info(f"Saved power reading for {rack_name} to {filepath}")
+        
+        # Store the last saved file name for reference
+        self.last_saved_file = filename
+        
+        return filepath
+
+    # Add this method to the RackPowerMonitor class
+    def reset_session(self):
+        """Reset the session ID to create a new file for a new monitoring session."""
+        import datetime
+        self.session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        logger.info(f"Reset monitoring session with new ID: {self.session_id}")

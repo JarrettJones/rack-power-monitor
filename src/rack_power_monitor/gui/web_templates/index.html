@@ -184,7 +184,15 @@
                                     <p class="no-data">No data available</p>
                                     {% endif %}
                                     
-                                    <a href="/rack/{{ rack.name }}" class="view-button">View Details</a>
+                                    <div class="rack-actions">
+                                        <a href="/rack/{{ rack.name }}" class="view-button">View Details</a>
+                                        <button class="action-btn stop" onclick="stopMonitoring('{{ rack.name }}')">
+                                            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                                <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM6.5 5A1.5 1.5 0 0 0 5 6.5v3A1.5 1.5 0 0 0 6.5 11h3A1.5 1.5 0 0 0 11 9.5v-3A1.5 1.5 0 0 0 9.5 5h-3z"/>
+                                            </svg>
+                                            Stop Monitoring
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                             {% endfor %}
@@ -225,8 +233,16 @@
                                     <p class="no-data">No data available</p>
                                     {% endif %}
                                     
-                                    <!-- Add the view button here -->
-                                    <a href="/rack/{{ rack.name }}" class="view-button">View Details</a>
+                                    <div class="rack-actions">
+                                        <a href="/rack/{{ rack.name }}" class="view-button">View Details</a>
+                                        <button class="action-btn start" onclick="openStartMonitoringModal('{{ rack.name }}')">
+                                            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                                                <path d="M6.271 5.055a.5.5 0 0 1 .52.038l3.5 2.5a.5.5 0 0 1 0 .814l-3.5 2.5A.5.5 0 0 1 6 10.5v-5a.5.5 0 0 1 .271-.445z"/>
+                                            </svg>
+                                            Start Monitoring
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                             {% endfor %}
@@ -237,7 +253,33 @@
                         {% endif %}
                     </div>
                 </div>
-                
+                <div id="monitoring-modal" class="modal">
+                    <div class="modal-content">
+                        <span class="close-modal" onclick="closeMonitoringModal()">&times;</span>
+                        <h3>Start Monitoring</h3>
+                        <form id="start-monitoring-form">
+                            <input type="hidden" id="rack-name-input" name="rack_name">
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="interval-input">Interval (minutes):</label>
+                                    <input type="number" id="interval-input" name="interval" min="0.1" step="0.1" value="1.0" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="duration-input">Duration (hours):</label>
+                                    <input type="number" id="duration-input" name="duration" min="0" step="0.5" value="0" placeholder="0 for continuous">
+                                    <small>Leave at 0 for continuous monitoring</small>
+                                </div>
+                            </div>
+                            
+                            <div class="form-actions">
+                                <button type="submit" class="primary-button">Start Monitoring</button>
+                                <button type="button" class="secondary-button" onclick="closeMonitoringModal()">Cancel</button>
+                            </div>
+                        </form>
+                        <div id="monitor-status" class="status-message"></div>
+                    </div>
+                </div>
                 <!-- For Saved Data Tab (newly added) -->
                 <div id="SavedDataTab" class="tabcontent">
                     <div class="saved-data-container">
@@ -347,6 +389,11 @@
         <!-- Add new R-SCM form -->
         <div class="card">
             <h3>Add New R-SCM</h3>
+            <button id="test-notification-btn" 
+        onclick="testShowNotification('Test Rack', 'test_rack_20250522_123456.csv')" 
+        style="position: fixed; bottom: 10px; right: 10px; z-index: 1000; padding: 5px 10px; background: #333; color: white; border: none;">
+    Test Notification
+</button>
             <form id="add-rscm-form" method="POST" action="/api/rscm/add">
     <div class="form-row">
         <div class="form-group">
@@ -795,9 +842,9 @@
                 
                 rackSections.forEach(section => {
                     if (section.getAttribute('data-page') == pageNum) {
-                        section.style.display = 'block';
+                        section.style.display = "block";
                     } else {
-                        section.style.display = 'none';
+                        section.style.display = "none";
                     }
                 });
                 
@@ -871,6 +918,326 @@
             }
         });
     }
+    function openStartMonitoringModal(rackName) {
+        const modal = document.getElementById('monitoring-modal');
+        document.getElementById('rack-name-input').value = rackName;
+        document.getElementById('monitor-status').textContent = '';
+        document.getElementById('monitor-status').className = 'status-message';
+        
+        // Reset form to defaults
+        document.getElementById('interval-input').value = '1.0';
+        document.getElementById('duration-input').value = '0';
+        
+        modal.style.display = 'block';
+    }
+    
+    function closeMonitoringModal() {
+        document.getElementById('monitoring-modal').style.display = 'none';
+    }
+    
+    // Handle monitoring form submission
+    document.getElementById('start-monitoring-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const rackName = document.getElementById('rack-name-input').value;
+        const interval = document.getElementById('interval-input').value;
+        const duration = document.getElementById('duration-input').value;
+        const statusElement = document.getElementById('monitor-status');
+        
+        const formData = new FormData();
+        formData.append('rack_name', rackName);
+        formData.append('interval', interval);
+        formData.append('duration', duration);
+        
+        // Show loading message
+        statusElement.textContent = 'Starting monitoring...';
+        statusElement.className = 'status-message';
+        
+        fetch('/api/rscm/start-monitoring', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                statusElement.textContent = data.message;
+                statusElement.className = 'status-message success';
+                
+                // Close the modal and refresh the page after a delay
+                setTimeout(() => {
+                    closeMonitoringModal();
+                    location.reload();
+                }, 1500);
+            } else {
+                statusElement.textContent = data.message;
+                statusElement.className = 'status-message error';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            statusElement.textContent = 'An error occurred while starting monitoring';
+            statusElement.className = 'status-message error';
+        });
+    });
+    
+    // Close modal when clicking outside of it
+    window.addEventListener('click', function(event) {
+        const modal = document.getElementById('monitoring-modal');
+        if (event.target === modal) {
+            closeMonitoringModal();
+        }
+    });
+    
+function stopMonitoring(rackName) {
+    if (confirm(`Are you sure you want to stop monitoring ${rackName}?`)) {
+        console.log(`Stopping monitoring for ${rackName}...`);
+        
+        fetch(`/api/rscm/pause/${rackName}`, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log("Stop monitoring response:", data);
+            
+            if (data.success) {
+                // Use the saved file from the response if available
+                const fileName = data.saved_file || `${rackName}_data.csv`;
+                
+                // Show the notification
+                showSaveNotification({
+                    rackName: rackName,
+                    fileName: fileName,
+                    message: `Monitoring stopped for ${rackName}. Data has been saved.`,
+                    success: true
+                });
+            } else {
+                alert(data.message || 'Failed to stop monitoring');
+                location.reload();
+            }
+        })
+        .catch(error => {
+            console.error('Error stopping monitoring:', error);
+            alert('An error occurred while stopping monitoring');
+            location.reload();
+        });
+    }
+}
+/*
+function stopMonitoring(rackName) {
+    if (confirm(`Are you sure you want to stop monitoring ${rackName}?`)) {
+        console.log(`Stopping monitoring for ${rackName}...`);
+        
+        fetch(`/api/rscm/pause/${rackName}`, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log("Received response:", data);
+            
+            if (data.success) {
+                // Check if a file was saved
+                if (data.saved_file) {
+                    console.log(`File saved: ${data.saved_file}`);
+                    // Show a simple notification
+                    showSaveNotification({
+                        rackName: rackName,
+                        fileName: data.saved_file,
+                        message: `Monitoring stopped for ${rackName}. Data saved to:`,
+                        success: true
+                    });
+                } else {
+                    console.log("No saved file in response");
+                    // Show simple alert if no file was saved
+                    alert(`Monitoring stopped for ${rackName}`);
+                    // Reload to update UI
+                    location.reload();
+                }
+            } else {
+                alert(data.message || 'Failed to stop monitoring');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred');
+        });
+    }
+}
+*/
+
+function testShowNotification(rackName, fileName) {
+    console.log("Testing notification display with:", {rackName, fileName});
+    
+    try {
+        showSaveNotification({
+            rackName: rackName,
+            fileName: fileName,
+            message: `Monitoring stopped for ${rackName}. Data saved to:`,
+            success: true
+        });
+        console.log("Notification should be displayed now");
+    } catch (error) {
+        console.error("Error showing notification:", error);
+        alert(`Monitoring stopped for ${rackName}. Error showing notification.`);
+        location.reload();
+    }
+}
+
+// Define the notification functions globally
+function showSaveNotification(data) {
+    console.log("showSaveNotification called with:", data);
+    
+    // Create notification overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'notification-overlay';
+    
+    // Create notification content
+    const notification = document.createElement('div');
+    notification.className = 'save-notification';
+    
+    console.log("Building notification HTML");
+    
+    // Format the filename for better display
+    const displayFileName = data.fileName || `Data for ${data.rackName}`;
+    
+    // Build notification content
+    notification.innerHTML = `
+        <div class="notification-header">
+            <h3>Monitoring Complete</h3>
+            <button class="close-notification" onclick="closeNotification()">&times;</button>
+        </div>
+        <div class="notification-content">
+            <p>${data.message}</p>
+            <div class="file-info">
+                <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/>
+                    <path d="M4.5 12.5A.5.5 0 0 1 5 12h3a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zm0-2A.5.5 0 0 1 5 10h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5z"/>
+                </svg>
+                <span class="file-name">${displayFileName}</span>
+            </div>
+        </div>
+        <div class="notification-actions">
+            <button class="action-btn view" onclick="viewSavedFile('${data.fileName}')">
+                View Data
+            </button>
+            <button class="action-btn continue" onclick="closeNotification()">
+                Continue
+            </button>
+        </div>
+    `;
+    
+    console.log("Adding notification to overlay");
+    // Add to document
+    overlay.appendChild(notification);
+    document.body.appendChild(overlay);
+    
+    console.log("Setting timeout for animation");
+    // Add animation class after a small delay (for transition effect)
+    setTimeout(() => {
+        console.log("Adding visible class to notification");
+        notification.classList.add('visible');
+    }, 10);
+
+    console.log("Notification setup complete");
+}
+
+
+function closeNotification() {
+    console.log("closeNotification called");
+    const overlay = document.querySelector('.notification-overlay');
+    if (overlay) {
+        console.log("Found overlay, starting fade-out");
+        const notification = overlay.querySelector('.save-notification');
+        notification.classList.remove('visible');
+        
+        setTimeout(() => {
+            console.log("Removing overlay from DOM");
+            document.body.removeChild(overlay);
+            console.log("Reloading page");
+            location.reload();
+        }, 300);
+    } else {
+        console.log("No notification overlay found");
+        location.reload();
+    }
+}
+
+function viewSavedFile(fileName) {
+    console.log(`Navigating to Saved Data tab for file: ${fileName}`);
+    
+    // Extract rack name from filename based on session ID format
+    let rackName = fileName;
+    if (fileName && fileName.includes('_')) {
+        rackName = fileName.split('_')[0];
+    }
+    
+    // Close the notification
+    closeNotification();
+    
+    // Switch to the SavedDataTab
+    const savedDataTab = document.querySelector('.tablinks[data-tab="SavedDataTab"]');
+    if (savedDataTab) {
+        console.log("Switching to Saved Data tab");
+        const event = new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+        });
+        savedDataTab.dispatchEvent(event);
+        
+        // Let the tab initialize
+        setTimeout(() => {
+            // Filter by rack name
+            const rscmSelector = document.getElementById('rscm-selector');
+            if (rscmSelector) {
+                // Find options that match the rack name
+                for (let i = 0; i < rscmSelector.options.length; i++) {
+                    const option = rscmSelector.options[i];
+                    if (option.value === rackName || option.value.includes(rackName) || rackName.includes(option.value)) {
+                        console.log(`Filtering by RSCM: ${option.value}`);
+                        rscmSelector.value = option.value;
+                        filterRackSections(option.value);
+                        break;
+                    }
+                }
+            }
+            
+            // Try to find and load the file by its name
+            setTimeout(() => {
+                const fileCards = document.querySelectorAll('.file-card');
+                let found = false;
+                
+                // Try to find an exact match first
+                for (let card of fileCards) {
+                    const cardTitle = card.querySelector('h4').textContent;
+                    if (cardTitle === fileName) {
+                        console.log(`Found exact file: ${cardTitle}`);
+                        card.click();
+                        found = true;
+                        break;
+                    }
+                }
+                
+                // If no exact match, try to find the newest file for this rack
+                if (!found && fileCards.length > 0) {
+                    console.log(`No exact match found, looking for recent files for ${rackName}`);
+                    // Find all files for this rack
+                    const rackFiles = Array.from(fileCards).filter(card => {
+                        const cardTitle = card.querySelector('h4').textContent;
+                        return cardTitle.startsWith(rackName + '_');
+                    });
+                    
+                    // If we found any files, click the first one (should be most recent)
+                    if (rackFiles.length > 0) {
+                        console.log(`Found ${rackFiles.length} files for ${rackName}, selecting first one`);
+                        rackFiles[0].click();
+                    }
+                }
+            }, 300);
+        }, 300);
+    } else {
+        alert("Could not navigate to the Saved Data tab. Please go there manually to view your saved data.");
+    }
+}
     </script>
 </body>
 </html>

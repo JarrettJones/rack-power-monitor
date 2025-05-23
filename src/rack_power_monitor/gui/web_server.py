@@ -675,21 +675,67 @@ class WebMonitorServer:
                 return jsonify({"success": False, "message": f"Error: {str(e)}"})
 
         @self.flask_app.route('/api/rscm/pause/<rack_name>', methods=['POST'])
-        def pause_monitoring(rack_name):
-            """Pause monitoring for an R-SCM."""
+        def pause_rack_monitoring(rack_name):
+            """Pause monitoring for a specific rack."""
             try:
-                if hasattr(self.app, 'pause_monitoring'):
-                    success = self.app.pause_monitoring(rack_name)
-                    if success:
-                        return jsonify({"success": True, "message": "Monitoring paused"})
-                    else:
-                        return jsonify({"success": False, "message": "Failed to pause monitoring"})
+                # Check if we have a monitor_tab to work with
+                if hasattr(self.app, 'monitor_tab') and hasattr(self.app.monitor_tab, '_stop_rack_monitoring'):
+                    # First get the rack address - needed for _stop_rack_monitoring
+                    rack_address = None
+                    
+                    # Find the rack in the tree to get its address
+                    for item_id in self.app.monitor_tab.rscm_tree.get_children():
+                        item = self.app.monitor_tab.rscm_tree.item(item_id)
+                        if item['values'][0] == rack_name:
+                            rack_address = item['values'][1]
+                            break
+                    
+                    if not rack_address:
+                        return jsonify({
+                            'success': False,
+                            'message': f'Rack {rack_name} not found'
+                        })
+                    
+                    # Try to get the actual saved filename before stopping
+                    saved_file = None
+                    
+                    # Check if the monitor has an active session and stored filename
+                    if hasattr(self.app.monitor_tab, 'active_monitors') and rack_name in self.app.monitor_tab.active_monitors:
+                        monitor_obj = self.app.monitor_tab.active_monitors[rack_name]
+                        if hasattr(monitor_obj, 'last_saved_file'):
+                            saved_file = monitor_obj.last_saved_file
+                    
+                    # Use the same method used in the GUI
+                    logging.info(f"Calling _stop_rack_monitoring for {rack_name} at {rack_address}")
+                    self.app.monitor_tab._stop_rack_monitoring(rack_name, rack_address)
+                    logging.info(f"Successfully stopped monitoring for {rack_name}")
+                    
+                    # If we couldn't get the actual filename, generate one that follows the same pattern
+                    if not saved_file:
+                        from datetime import datetime
+                        now = datetime.now()
+                        session_id = now.strftime("%Y%m%d_%H%M%S")
+                        saved_file = f"{rack_name}_{session_id}.csv"
+                    
+                    return jsonify({
+                        'success': True,
+                        'message': 'Monitoring paused',
+                        'saved_file': saved_file
+                    })
                 else:
-                    return jsonify({"success": False, "message": "Monitoring control not available"})
-            
+                    logging.error("Monitoring functionality not available")
+                    return jsonify({
+                        'success': False,
+                        'message': 'Monitoring functionality not available'
+                    })
             except Exception as e:
-                self.app.logger.error(f"Error pausing monitoring: {str(e)}")
-                return jsonify({"success": False, "message": f"Error: {str(e)}"})
+                logging.error(f"Error pausing monitoring: {str(e)}")
+                import traceback
+                logging.error(traceback.format_exc())
+                return jsonify({
+                    'success': False,
+                    'message': f'Error: {str(e)}'
+                })
 
         @self.flask_app.route('/api/rscm/info/<rack_name>')
         def get_rscm_info(rack_name):
@@ -784,6 +830,65 @@ class WebMonitorServer:
                     'message': f'Error retrieving debug info: {str(e)}'
                 })
         
+        @self.flask_app.route('/api/debug/monitor-status', methods=['GET'])
+        def debug_monitor_status():
+            """Get debug information about the monitoring status."""
+            try:
+                status = {
+                    'monitor_tab_exists': False,
+                    'active_monitors': [],
+                    'save_data_enabled': False,
+                    'power_data_dir_exists': False,
+                    'power_data_dir_path': '',
+                    'recent_files': []
+                }
+                
+                # Check if monitor_tab exists
+                if hasattr(self.app, 'monitor_tab'):
+                    status['monitor_tab_exists'] = True
+                    
+                    # Check if save_data flag is enabled
+                    if hasattr(self.app.monitor_tab, 'save_data'):
+                        status['save_data_enabled'] = self.app.monitor_tab.save_data
+                    
+                    # Check for active monitors
+                    if hasattr(self.app.monitor_tab, 'active_monitors'):
+                        active = self.app.monitor_tab.active_monitors
+                        if active:
+                            for rack, monitor in active.items():
+                                status['active_monitors'].append({
+                                    'rack': rack,
+                                    'started': str(monitor.get('started', 'unknown')),
+                                    'save_enabled': monitor.get('save', False)
+                                })
+                
+                # Check power_data directory
+                import os
+                power_data_dir = os.path.join(os.getcwd(), 'power_data')
+                status['power_data_dir_path'] = power_data_dir
+                
+                if os.path.exists(power_data_dir):
+                    status['power_data_dir_exists'] = True
+                    
+                    # Get recent files
+                    if os.path.isdir(power_data_dir):
+                        files = [f for f in os.listdir(power_data_dir) if f.endswith('.csv')]
+                        if files:
+                            # Sort by modification time, newest first
+                            files.sort(key=lambda x: os.path.getmtime(os.path.join(power_data_dir, x)), reverse=True)
+                            status['recent_files'] = files[:5]  # Get 5 most recent files
+                
+                return jsonify(status)
+                
+            except Exception as e:
+                logging.error(f"Error in debug_monitor_status: {str(e)}")
+                import traceback
+                logging.error(traceback.format_exc())
+                return jsonify({
+                    'error': str(e),
+                    'traceback': traceback.format_exc()
+                })
+        
         @self.flask_app.template_filter('timestamp')
         def format_timestamp(timestamp):
             """Format a timestamp for display."""
@@ -873,6 +978,120 @@ class WebMonitorServer:
                 logging.error(f"Error in get_saved_data: {str(e)}")
                 logging.error(traceback.format_exc())
                 return jsonify({'success': False, 'error': str(e)})
+        
+        # Add this new route inside the setup_routes method
+        @self.flask_app.route('/api/rscm/start-monitoring', methods=['POST'])
+        def start_rack_monitoring():
+            """Start monitoring a rack with specified interval and duration."""
+            try:
+                rack_name = request.form.get('rack_name')
+                interval = float(request.form.get('interval', 1.0))
+                duration = float(request.form.get('duration', 0))
+                
+                # Convert duration 0 to None for continuous monitoring
+                if duration == 0:
+                    duration = None
+                
+                logging.info(f"Starting monitoring for {rack_name} with interval={interval} and duration={duration}")
+                
+                # First find the rack address using the existing get_rscm_info method
+                if hasattr(self.app, 'get_rscm_info'):
+                    rscm_info = self.app.get_rscm_info(rack_name)
+                    if not rscm_info:
+                        return jsonify({
+                            'success': False,
+                            'message': f'Could not find rack {rack_name}'
+                        })
+                    
+                    rack_address = rscm_info.get('address')
+                    if not rack_address:
+                        return jsonify({
+                            'success': False,
+                            'message': f'No address found for rack {rack_name}'
+                        })
+                        
+                    # Start monitoring if monitor_tab is available
+                    if hasattr(self.app, 'monitor_tab'):
+                        # Try to determine which monitoring method to use
+                        monitor_method = None
+                        
+                        # Check for different method names that might exist
+                        if hasattr(self.app.monitor_tab, '_monitor_single_rack_isolated'):
+                            monitor_method = self.app.monitor_tab._monitor_single_rack_isolated
+                        elif hasattr(self.app.monitor_tab, 'monitor_single_rack'):
+                            monitor_method = self.app.monitor_tab.monitor_single_rack
+                        elif hasattr(self.app.monitor_tab, 'start_monitoring'):
+                            monitor_method = self.app.monitor_tab.start_monitoring
+                        
+                        if monitor_method:
+                            # Try to call the monitor method with explicit save parameter
+                            try:
+                                # Different methods might have different parameter signatures
+                                # Try each possible signature
+                                try:
+                                    # Try with explicit save=True parameter
+                                    monitor_method(
+                                        rack_name=rack_name,
+                                        rack_address=rack_address,
+                                        interval_minutes=interval,
+                                        duration_hours=duration,
+                                        save=True  # Explicitly request saving
+                                    )
+                                except TypeError:
+                                    # If that fails, try without the save parameter
+                                    monitor_method(
+                                        rack_name=rack_name,
+                                        rack_address=rack_address,
+                                        interval_minutes=interval,
+                                        duration_hours=duration
+                                    )
+                                    
+                                    # Enable saving by setting a flag if available
+                                    if hasattr(self.app.monitor_tab, 'save_data'):
+                                        self.app.monitor_tab.save_data = True
+                                    
+                                logging.info(f"Successfully started monitoring for {rack_name}")
+                                
+                                # Return success
+                                return jsonify({
+                                    'success': True,
+                                    'message': f'Monitoring started for {rack_name}',
+                                    'interval': interval,
+                                    'duration': 'Continuous' if duration is None else f'{duration} hours'
+                                })
+                                
+                            except Exception as e:
+                                logging.error(f"Error starting monitoring: {str(e)}")
+                                import traceback
+                                logging.error(traceback.format_exc())
+                                return jsonify({
+                                    'success': False,
+                                    'message': f'Error starting monitoring: {str(e)}'
+                                })
+                        else:
+                            return jsonify({
+                                'success': False,
+                                'message': 'Monitoring method not found'
+                            })
+                    else:
+                        return jsonify({
+                            'success': False,
+                            'message': 'Monitoring functionality not available'
+                        })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'message': 'Cannot retrieve rack information'
+                    })
+                    
+            except Exception as e:
+                logging.error(f"Error in start_rack_monitoring: {str(e)}")
+                import traceback
+                logging.error(traceback.format_exc())
+                return jsonify({
+                    'success': False,
+                    'message': f'Error: {str(e)}'
+                })
         
     def start(self):
         """Start the web server in a separate thread."""
